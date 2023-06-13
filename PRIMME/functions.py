@@ -25,13 +25,15 @@ import matplotlib.colors as mcolors
 
 ### Script
 
+unfold_mem_lim = 4e9
+
 fp = './data/'
 if not os.path.exists(fp): os.makedirs(fp)
 
 fp = './plots/'
 if not os.path.exists(fp): os.makedirs(fp)
 
-device=torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # device=torch.device("cpu")
 
 
@@ -160,27 +162,60 @@ def flatten_indices(indices, sz):
     return index
 
 
-def unfold_in_batches(im, batch_sz, kernel_sz, stride, if_shuffle=False):
-    #Create an unfolded view of 'im' (torch.Tensor) 
+def periodic_pad_1d(im, dim, p):
+    #Pads 'im' along 'dim' with an int 'p' of padding on both sides
+    
+    if p==0: return im
+    
+    num_dim = im.dim()
+    
+    b = dim #number of empty slices before the dimension
+    a = num_dim - dim - 1 #number of empty slices after the dimension
+    
+    im_padded = F.pad(im, [0,0]*a+[p,p])
+    im_padded[(slice(None),)*b + (slice(None,p),) + (slice(None),)*a] = im[(slice(None),)*b + (slice(-p,None),) + (slice(None),)*a]
+    im_padded[(slice(None),)*b + (slice(-p,None),) + (slice(None),)*a] = im[(slice(None),)*b + (slice(None,p),) + (slice(None),)*a] 
+    
+    return im_padded
+
+
+def unfold_in_batches(im, batch_sz, kernel_sz, stride, pad_mode='circular', if_shuffle=False):
+    #Create an unfolded view of 'im' (torch.Tensor)
     #Given 'kernel_sz' (tuple) and 'stride' (tuple)
     #Yield 'batch_sz' (int) portions of the view at a time
-    #Shuffles output if 'if_shuffle', but yields each kernal once each
+    #Shuffles output if 'if_shuffle', then yields each kernal once each
     
-    dm = im.dim()
-    sz = tuple(im.size())
+    im_padded = im.clone()
+    for i in range(len(kernel_sz)):
+        p = int(kernel_sz[i]/stride[i]/2)
+        im_padded = periodic_pad_1d(im_padded, i, p)
+        
+    
+    # # Delete later, doesn't work for 3D #!!!
+    # #Pad the image
+    # tmp = torch.Tensor(kernel_sz)/torch.Tensor(stride)/2
+    # pad = tuple(np.flip(tmp.repeat_interleave(2).int().numpy())) #calculate padding needed based on kernel_size
+    # if pad_mode!=None: im_padded = pad_mixed(im[None,None], pad, pad_mode)[0,0,] #pad "ims" to maintain dimensions after unfolding
+    
+
+    #Variables
+    dm = im_padded.dim()
+    sz = tuple(im_padded.size())
     sz_new = torch.Tensor(sz)-(torch.Tensor(kernel_sz)-1)
     num_kernels = int(torch.prod(sz_new))
     
-    im_unfolded = im.unfold(0,kernel_sz[0],stride[0])
+    #Unfold as a view
+    im_unfolded = im_padded.unfold(0,kernel_sz[0],stride[0])
     for i in range(dm-1): im_unfolded = im_unfolded.unfold(i+1,kernel_sz[i+1],stride[i+1])
     
+    #Split and return unfold in batches
     if if_shuffle is True: i = torch.randperm(num_kernels)
     else: i = torch.arange(num_kernels)
     i_split = torch.split(i,batch_sz)
     
     for j in i_split:
         indices = shape_indices(j, sz_new)
-        yield im_unfolded[indices]
+        yield im_unfolded[indices].float()
 
 
 
@@ -1370,51 +1405,93 @@ def gid_to_miso(ims_unfold, miso_matrices):
     return ims_unfold_miso
 
 
+
 def neighborhood_miso(ims, miso_matrices, window_size=3, pad_mode='circular'): 
     # ims - torch.Tensor of shape [# of images, 1, dim1, dim2, dim3(optional)]
     # miso_matrices: grain id misorientations in radians, shape=(num_images, dim1, dim2)
     # window_size - the patch around each pixel that constitutes its neighbors
     # May need to add memory management through batches for large tensors in the future
     
+    
+    #NEW #!!!
     if type(window_size)==int: window_size = [window_size] #convert to "list" if "int" is given
     
-    ims_unfold = my_unfoldNd(ims, kernel_size=window_size, pad_mode=pad_mode)
-    # miso_matrices = miso_array_to_matrix(miso_arrays) #indicies to convert miso array to matrix
-    # del miso_arrays
-    ims_unfold_miso = gid_to_miso(ims_unfold, miso_matrices)
-    del miso_matrices
+    d = ims.dim()-2
+    kernel_sz = window_size*d
+    stride = (1,)*d
     
+    batch_sz = int(unfold_mem_lim/(torch.prod(torch.Tensor(kernel_sz))*64))
+    unfold_gen = unfold_in_batches(ims[0,0], batch_sz, kernel_sz, stride, pad_mode)
+      
+    log = []
+    for batch in unfold_gen:
+        im_unfold = batch.reshape(batch.shape[0],-1).T[None,]
+        im_unfold_miso = gid_to_miso(im_unfold, miso_matrices)
+        log.append(torch.sum(im_unfold_miso, axis=1)[0])
+        
     if pad_mode==None: s = ims.shape[:2]+tuple(np.array(ims.shape[2:])-window_size+1)
     else: s = ims.shape
-    ims_miso = torch.sum(ims_unfold_miso, axis=1).reshape(s) #misorientation image
+    ims_miso = torch.cat(log).reshape(s) #misorientation image
+    
+    
+    # if type(window_size)==int: window_size = [window_size] #convert to "list" if "int" is given
+    
+    # ims_unfold = my_unfoldNd(ims, kernel_size=window_size, pad_mode=pad_mode)
+    # # miso_matrices = miso_array_to_matrix(miso_arrays) #indicies to convert miso array to matrix
+    # # del miso_arrays
+    # ims_unfold_miso = gid_to_miso(ims_unfold, miso_matrices)
+    # del miso_matrices
+    
+    # if pad_mode==None: s = ims.shape[:2]+tuple(np.array(ims.shape[2:])-window_size+1)
+    # else: s = ims.shape
+    # ims_miso = torch.sum(ims_unfold_miso, axis=1).reshape(s) #misorientation image
+    
+    
     return ims_miso #reshape to orignal image shape
 
 
 def neighborhood_miso_spparks(ims, miso_matrices, cut=25, window_size=3, pad_mode='circular'): 
     #ims - torch.Tensor of shape [# of images, 1, dim1, dim2, dim3(optional)]
-    #'miso_matrices' - grain id misorientations in radians
+    #'miso_matrices' - grain id misorientations in radians, shape=(num_images, dim1, dim2)
     #window_size - the patch around each pixel that constitutes its neighbors
     #May need to add memory management through batches for large tensors in the future
     #Calculated the same as in spparks
     
     if type(window_size)==int: window_size = [window_size] #convert to "list" if "int" is given
     
-    ims_unfold = my_unfoldNd(ims, kernel_size=window_size, pad_mode=pad_mode)
-    # miso_matrices = miso_array_to_matrix(miso_arrays) #indicies to convert miso array to matrix
-    # del miso_arrays
-    ims_unfold_miso = gid_to_miso(ims_unfold, miso_matrices)
-    del miso_matrices
-    
     if pad_mode==None: s = ims.shape[:2]+tuple(np.array(ims.shape[2:])-window_size+1)
     else: s = ims.shape
     
-    ims_unfold_miso = ims_unfold_miso/np.pi*180 #convert to degrees
-    r = ims_unfold_miso/cut
-    tmp = r*(1-torch.log(r))
-    tmp[torch.isnan(tmp)] = 0
-    tmp[ims_unfold_miso>cut] = 1
+    d = ims.dim()-2
+    mem = window_size[0]**d*64
+    mem_lim = 1e9
+    batch_sz = int(mem_lim/mem)
+    kernel_sz = tuple(window_size*d)
+    stride = (1,)*d
     
-    ims_miso = torch.sum(tmp, axis=1).reshape(s) #misorientation image
+    unfold_gen = unfold_in_batches(ims[0,0], batch_sz, kernel_sz, stride)
+    
+    log = []
+    for ims_unfold in unfold_gen:
+        ims_unfold = ims_unfold.reshape(ims_unfold.shape[0], -1).transpose(0,1)[None,]
+        ims_unfold_miso = gid_to_miso(ims_unfold, miso_matrices)
+        ims_unfold_miso = ims_unfold_miso/np.pi*180 #convert to degrees
+        r = ims_unfold_miso/cut
+        tmp = r*(1-torch.log(r))
+        tmp[torch.isnan(tmp)] = 0
+        tmp[ims_unfold_miso>cut] = 1
+        ims_miso_part = tmp.sum(0).sum(0)
+        log.append(ims_miso_part)
+    ims_miso = torch.cat(log).reshape(s)
+    
+    # ims_unfold = my_unfoldNd(ims, kernel_size=window_size, pad_mode=pad_mode)
+    # ims_unfold_miso = gid_to_miso(ims_unfold, miso_matrices)
+    # ims_unfold_miso = ims_unfold_miso/np.pi*180 #convert to degrees
+    # r = ims_unfold_miso/cut
+    # tmp = r*(1-torch.log(r))
+    # tmp[torch.isnan(tmp)] = 0
+    # tmp[ims_unfold_miso>cut] = 1
+    # ims_miso = torch.sum(tmp, axis=1).reshape(s) #misorientation image
     
     return ims_miso #reshape to orignal image shape
 
@@ -1423,18 +1500,27 @@ def mean_wo_zeros(a):
     return torch.sum(a)/torch.sum(a!=0)
 
 
-def iterate_function(array, func, args=[], device=device):
+def iterate_function(array, func, n=None, args=[], device=device):
     
     #Iterate through the first dimension in "array" and apply "func" using "args"
+    if n is None: ii = np.arange(len(array))
+    else: ii = np.linspace(0,len(array)-1,n).astype(int)
     log = []
-    for i in tqdm(range(array.shape[0]), 'In progress: %s'%func.__name__):
+    for i in tqdm(ii, 'In progress: %s'%func.__name__):
         im = torch.from_numpy(array[i:i+1,][:].astype('float')).to(device)
         tmp = func(im, *args).cpu().numpy()
         log.append(tmp)
     return np.stack(log)
+    
+    # log = []
+    # for i in tqdm(range(array.shape[0]), 'In progress: %s'%func.__name__):
+    #     im = torch.from_numpy(array[i:i+1,][:].astype('float')).to(device)
+    #     tmp = func(im, *args).cpu().numpy()
+    #     log.append(tmp)
+    # return np.stack(log)
 
 
-def compute_grain_stats(hps, gps='last', device=device):
+def compute_grain_stats(hps, gps='last', n=None, device=device):
     
     #Make 'hps' and 'gps' a list if it isn't already, and set default 'gps'
     if type(hps)!=list: hps = [hps]
@@ -1487,7 +1573,7 @@ def compute_grain_stats(hps, gps='last', device=device):
             if 'grain_sides' not in g.keys():
                 args = [max_id]
                 func = find_grain_num_neighbors
-                grain_sides = iterate_function(d, func, args)
+                grain_sides = iterate_function(d, func, n, args)
                 g['grain_sides'] = grain_sides
                 print('Calculated: grain_sides')
             else: grain_sides = None
@@ -1496,7 +1582,7 @@ def compute_grain_stats(hps, gps='last', device=device):
             if 'grain_sides_avg' not in g.keys():
                 if np.all(grain_sides==None): grain_sides = g['grain_sides']
                 func = mean_wo_zeros
-                grain_sides_avg = iterate_function(grain_sides, func, args=[])
+                grain_sides_avg = iterate_function(grain_sides, func, n=n, args=[])
                 g['grain_sides_avg'] = grain_sides_avg
                 print('Calculated: grain_sides_avg')
             
@@ -1504,7 +1590,7 @@ def compute_grain_stats(hps, gps='last', device=device):
             if 'ims_miso' not in g.keys():
                 args = [miso_matrix[None,]]
                 func = neighborhood_miso
-                ims_miso = iterate_function(d, func, args)[:,0]
+                ims_miso = iterate_function(d, func, n, args)[:,0]
                 g['ims_miso'] = ims_miso
                 print('Calculated: ims_miso')
             else: ims_miso = None
@@ -1513,7 +1599,7 @@ def compute_grain_stats(hps, gps='last', device=device):
             if 'ims_miso_avg' not in g.keys():
                 if np.all(ims_miso==None): ims_miso = g['ims_miso']
                 func = mean_wo_zeros
-                ims_miso_avg = iterate_function(ims_miso, func, args=[])
+                ims_miso_avg = iterate_function(ims_miso, func, n=n, args=[])
                 g['ims_miso_avg'] = ims_miso_avg
                 print('Calculated: ims_miso_avg')
             
@@ -1521,7 +1607,7 @@ def compute_grain_stats(hps, gps='last', device=device):
             if 'ims_miso_spparks' not in g.keys():
                 args = [miso_matrix[None,]]
                 func = neighborhood_miso_spparks
-                ims_miso_spparks = iterate_function(d, func, args)[:,0]
+                ims_miso_spparks = iterate_function(d, func, n, args)[:,0]
                 g['ims_miso_spparks'] = ims_miso_spparks
                 print('Calculated: ims_miso_spparks')
             else: ims_miso_spparks = None
@@ -1530,16 +1616,16 @@ def compute_grain_stats(hps, gps='last', device=device):
             if 'ims_miso_spparks_avg' not in g.keys():
                 if np.all(ims_miso_spparks==None): ims_miso_spparks = g['ims_miso_spparks']
                 func = mean_wo_zeros
-                ims_miso_spparks_avg = iterate_function(ims_miso_spparks, func, args=[])
+                ims_miso_spparks_avg = iterate_function(ims_miso_spparks, func, n=n, args=[])
                 g['ims_miso_spparks_avg'] = ims_miso_spparks_avg
                 print('Calculated: ims_miso_spparks_avg')
                 
-            # # Find dihedral angle standard deviation
-            # if 'dihedral_std' not in g.keys():
-            #     func = find_dihedral_stats
-            #     dihedral_std = iterate_function(d, func)
-            #     g['dihedral_std'] = dihedral_std
-            #     print('Calculated: dihedral_std')
+            # Find dihedral angle standard deviation
+            if 'dihedral_std' not in g.keys():
+                func = find_dihedral_stats
+                dihedral_std = iterate_function(d, func, n=n)
+                g['dihedral_std'] = dihedral_std
+                print('Calculated: dihedral_std')
             
             # # Find grain aspect ratios
             # if 'aspects' not in g.keys():
@@ -1651,7 +1737,13 @@ def make_time_plots(hps, gps='last', scale_ngrains_ratio=0.05, cr=None, legend=T
         ngrains = g['grain_areas'].shape[1]
         lim = total_area/(ngrains*scale_ngrains_ratio)
     
-    # Plot average grain area through time and find linear slopes
+    #Find number of dimensions
+    d = []
+    for i in range(len(hps)): 
+        with h5py.File(hps[i], 'r') as f:
+            d.append(len(f[gps[i]]['ims_id'].shape)-2)
+    
+    # Plot average grain radius squared through time and find linear slopes
     log = []
     ys = []
     ps = []
@@ -1659,17 +1751,24 @@ def make_time_plots(hps, gps='last', scale_ngrains_ratio=0.05, cr=None, legend=T
     for i in tqdm(range(len(hps)),'Calculating avg grain areas'):
         
         with h5py.File(hps[i], 'r') as f: 
-            grain_areas_avg = f[gps[i]+'/grain_areas_avg'][:]
-        log.append(grain_areas_avg)
+            grain_areas = f[gps[i]+'/grain_areas'][:]
         
-        x = np.arange(len(grain_areas_avg))
-        p = np.polyfit(x, grain_areas_avg, 1)
+        if d[i]==3: #if 3D volume, spherical
+            grain_radii = np.cbrt(grain_areas/np.pi*3/4)
+        else: #if 2D area, circle
+            grain_radii = np.sqrt(grain_areas/np.pi)
+        grain_radii_avg = grain_radii.sum(1)/(grain_radii!=0).sum(1) #find mean without zeros
+        r_avg2 = grain_radii_avg**2 #square after the mean
+        log.append(r_avg2)
+        
+        x = np.arange(len(r_avg2))
+        p = np.polyfit(x, r_avg2, 1)
         ps.append(p)
         
         fit_line = np.sum(np.array([p[j]*x*(len(p)-j-1) for j in range(len(p))]), axis=0)
         ys.append(fit_line)
         
-        r = np.corrcoef(grain_areas_avg, fit_line)[0,1]**2
+        r = np.corrcoef(r_avg2, fit_line)[0,1]**2
         rs.append(r)
     
     plt.figure()
@@ -1684,25 +1783,25 @@ def make_time_plots(hps, gps='last', scale_ngrains_ratio=0.05, cr=None, legend=T
     plt.savefig('./plots/avg_grain_area_time', dpi=300)
     if if_show: plt.show()
 
-    # Plot scaled average grain area through time and find linear slopes
+    # Plot scaled average grain radius squared through time and find linear slopes
     ys = []
     ps = []
     rs = []
     si = []
     xs = []
     for i in range(len(hps)):
-        grain_areas_avg = log[i]
-        ii = len(grain_areas_avg) - 1 - np.argmin(np.flip(np.abs(grain_areas_avg-lim)))
+        r_avg2 = log[i]
+        ii = len(r_avg2) - 1 - np.argmin(np.flip(np.abs(r_avg2-lim)))
         si.append(ii)
         
-        x = np.arange(len(grain_areas_avg))
-        p = np.polyfit(x, grain_areas_avg, 1)
+        x = np.arange(len(r_avg2))
+        p = np.polyfit(x, r_avg2, 1)
         ps.append(p)
         
         fit_line = np.sum(np.array([p[j]*x*(len(p)-j-1) for j in range(len(p))]), axis=0)
         ys.append(fit_line)
         
-        r = np.corrcoef(grain_areas_avg, fit_line)[0,1]**2
+        r = np.corrcoef(r_avg2, fit_line)[0,1]**2
         rs.append(r)
         
         xx = np.linspace(ngrains,int(ngrains*scale_ngrains_ratio),ii)
@@ -1764,7 +1863,12 @@ def make_time_plots(hps, gps='last', scale_ngrains_ratio=0.05, cr=None, legend=T
         ng = (grain_areas!=0).sum(1)
         j = (ng<tg).argmax()
         ga = grain_areas[j]
-        gr = np.sqrt(ga/np.pi)
+        
+        if d[i]==3: #if 3D volume, spherical
+            gr = np.cbrt(ga/np.pi*3/4)
+        else: #if 2D area, circle
+            gr = np.sqrt(ga/np.pi)
+        
         bins=np.linspace(0,3,20)
         gr_dist, _ = np.histogram(gr[gr!=0]/gr[gr!=0].mean(), bins)
         plt.plot(bins[1:]-0.5*(bins[1]-bins[0]), gr_dist/gr_dist.sum()/bins[1])
@@ -1803,71 +1907,71 @@ def make_time_plots(hps, gps='last', scale_ngrains_ratio=0.05, cr=None, legend=T
     plt.savefig('./plots/number_sides_distribution', dpi=300)
     if if_show: plt.show()
         
-    # Plot average misorientation per bounday pixel
-    log = []
-    for i in tqdm(range(len(hps)),'Plotting average miso'):
-        with h5py.File(hps[i], 'r') as f: 
-            ims_miso_avg = f[gps[i]+'/ims_miso_avg'][:]
-        log.append(ims_miso_avg)
+    # # Plot average misorientation per bounday pixel
+    # log = []
+    # for i in tqdm(range(len(hps)),'Plotting average miso'):
+    #     with h5py.File(hps[i], 'r') as f: 
+    #         ims_miso_avg = f[gps[i]+'/ims_miso_avg'][:]
+    #     log.append(ims_miso_avg)
     
-    plt.figure()
-    legend = []
-    for i in range(len(hps)):
-        plt.plot(log[i], c=c[i%len(c)])
-        legend.append('')
-    plt.title('Average miso per boundary pixel')
-    plt.xlabel('Number of frames')
-    plt.ylabel('Average miso per boundary pixel')
-    if legend==True: plt.legend(legend)
-    plt.savefig('./plots/avg_miso_time', dpi=300)
-    if if_show: plt.show()
+    # plt.figure()
+    # legend = []
+    # for i in range(len(hps)):
+    #     plt.plot(log[i], c=c[i%len(c)])
+    #     legend.append('')
+    # plt.title('Average miso per boundary pixel')
+    # plt.xlabel('Number of frames')
+    # plt.ylabel('Average miso per boundary pixel')
+    # if legend==True: plt.legend(legend)
+    # plt.savefig('./plots/avg_miso_time', dpi=300)
+    # if if_show: plt.show()
     
-    # Plot scaled average misorientation per bounday pixel
-    plt.figure()
-    legend = []
-    for i in range(len(hps)):
-        plt.plot(xs[i], log[i][:len(xs[i])], c=c[i%len(c)])
-        plt.xlim([np.max(xs[i]), np.min(xs[i])])
-        legend.append('')
-    plt.title('Average miso per boundary pixel (scaled)')
-    plt.xlabel('Number of grains')
-    plt.ylabel('Average miso per boundary pixel')
-    if legend==True: plt.legend(legend)
-    plt.savefig('./plots/avg_miso_time_scaled', dpi=300)
-    if if_show: plt.show()
+    # # Plot scaled average misorientation per bounday pixel
+    # plt.figure()
+    # legend = []
+    # for i in range(len(hps)):
+    #     plt.plot(xs[i], log[i][:len(xs[i])], c=c[i%len(c)])
+    #     plt.xlim([np.max(xs[i]), np.min(xs[i])])
+    #     legend.append('')
+    # plt.title('Average miso per boundary pixel (scaled)')
+    # plt.xlabel('Number of grains')
+    # plt.ylabel('Average miso per boundary pixel')
+    # if legend==True: plt.legend(legend)
+    # plt.savefig('./plots/avg_miso_time_scaled', dpi=300)
+    # if if_show: plt.show()
     
-    # Plot average misorientation per bounday pixel (SPPARKS)
-    log = []
-    for i in tqdm(range(len(hps)),'Plotting average spparks miso'):
-        with h5py.File(hps[i], 'r') as f: 
-            ims_miso_spparks_avg = f[gps[i]+'/ims_miso_spparks_avg'][:]
-        log.append(ims_miso_spparks_avg)
+    # # Plot average misorientation per bounday pixel (SPPARKS)
+    # log = []
+    # for i in tqdm(range(len(hps)),'Plotting average spparks miso'):
+    #     with h5py.File(hps[i], 'r') as f: 
+    #         ims_miso_spparks_avg = f[gps[i]+'/ims_miso_spparks_avg'][:]
+    #     log.append(ims_miso_spparks_avg)
     
-    plt.figure()
-    legend = []
-    for i in range(len(hps)):
-        plt.plot(log[i], c=c[i%len(c)])
-        legend.append('')
-    plt.title('Average miso per boundary pixel (SPPARKS)')
-    plt.xlabel('Number of frames')
-    plt.ylabel('Average miso per boundary pixel')
-    if legend==True: plt.legend(legend)
-    plt.savefig('./plots/avg_miso_spparks_time', dpi=300)
-    if if_show: plt.show()
+    # plt.figure()
+    # legend = []
+    # for i in range(len(hps)):
+    #     plt.plot(log[i], c=c[i%len(c)])
+    #     legend.append('')
+    # plt.title('Average miso per boundary pixel (SPPARKS)')
+    # plt.xlabel('Number of frames')
+    # plt.ylabel('Average miso per boundary pixel')
+    # if legend==True: plt.legend(legend)
+    # plt.savefig('./plots/avg_miso_spparks_time', dpi=300)
+    # if if_show: plt.show()
     
-    # Plot scaled average misorientation per bounday pixel (SPPARKS)
-    plt.figure()
-    legend = []
-    for i in range(len(hps)):
-        plt.plot(xs[i], log[i][:len(xs[i])], c=c[i%len(c)])
-        plt.xlim([np.max(xs[i]), np.min(xs[i])])
-        legend.append('')
-    plt.title('Average miso per boundary pixel (SPPARKS, scaled)')
-    plt.xlabel('Number of grains')
-    plt.ylabel('Average miso per boundary pixel')
-    if legend==True: plt.legend(legend)
-    plt.savefig('./plots/avg_miso_spparks_time_scaled', dpi=300)
-    if if_show: plt.show()
+    # # Plot scaled average misorientation per bounday pixel (SPPARKS)
+    # plt.figure()
+    # legend = []
+    # for i in range(len(hps)):
+    #     plt.plot(xs[i], log[i][:len(xs[i])], c=c[i%len(c)])
+    #     plt.xlim([np.max(xs[i]), np.min(xs[i])])
+    #     legend.append('')
+    # plt.title('Average miso per boundary pixel (SPPARKS, scaled)')
+    # plt.xlabel('Number of grains')
+    # plt.ylabel('Average miso per boundary pixel')
+    # if legend==True: plt.legend(legend)
+    # plt.savefig('./plots/avg_miso_spparks_time_scaled', dpi=300)
+    # if if_show: plt.show()
     
     # # Plot dihedral angle distribution standard deviation over time
     # log = []
@@ -2024,27 +2128,49 @@ def find_ncombo(im, n=3):
 
 def find_ncombo_avg(ncombo, sz):
     #Find the average of indices with the same ID combinations
-    #"ncombo" - shape=(n+2, num ID sets), sets of n combinations neighbors
+    #"ncombo" - shape=(n+d, num ID sets), sets of 'n' combinations neighbors in 'd' dimensions
     #For 2D and 3D
     #Assumes triplets only
     
     ids = ncombo[:3,][None,] #retrieve only the grain ID sets
-    matches = torch.all(ids==ids.T, dim=1) #contruct a matching matrix (find which ID sets are equal)
     
-    #Find the mean without zeros of all matching ID sets - when there is a "0" and a "256" in the locations, wrap "256" to "-1"
-    nmatch = torch.sum(matches, dim=1) 
+    log = []
+    for i in range(ids.shape[2]):
+        sid = ids[:,:,i][...,None]
+        match = torch.all(ids==sid.T, dim=1)
+        nmatch = match.sum()
     
-    tmp = []
-    for i in range(len(sz)): 
-        num_hi = torch.sum(matches*ncombo[i+3,:]==sz[i]-1, dim=1)
-        has0 = torch.sum(matches*ncombo[i+3,:]!=0, dim=1)!=nmatch
-        tmpi = torch.sum(matches*ncombo[i+3,:], dim=1)-(sz[i]*num_hi*has0)
-        tmp.append(tmpi/nmatch) #mean without zero
+        tmp = []
+        for j in range(len(sz)): 
+            num_hi = torch.sum(match*ncombo[j+3,:]==sz[j]-1, dim=1)
+            has0 = torch.sum(match*ncombo[j+3,:]!=0, dim=1)!=nmatch
+            tmpi = torch.sum(match*ncombo[j+3,:], dim=1)-(sz[j]*num_hi*has0)
+            tmp.append(tmpi/nmatch) #mean without zero
+            
+        log.append(torch.cat([sid[0,:,0,], *tmp]))
+    if len(log)==0: 
+        ncombo_avg = torch.zeros([5,0]).to(ncombo.device)
+    else:
+        ncombo_avg = torch.stack(log).T
+        ncombo_avg = torch.unique(ncombo_avg, dim=1) #remove duplicates
+
+    
+    # matches = torch.all(ids==ids.T, dim=1) #contruct a matching matrix (find which ID sets are equal)
+    # nmatch = torch.sum(matches, dim=1) 
+    
+    # #Find the mean without zeros of all matching ID sets - when there is a "0" and a "256" in the locations, wrap "256" to "-1"
+    # tmp = []
+    # for i in range(len(sz)): 
+    #     num_hi = torch.sum(matches*ncombo[i+3,:]==sz[i]-1, dim=1)
+    #     has0 = torch.sum(matches*ncombo[i+3,:]!=0, dim=1)!=nmatch
+    #     tmpi = torch.sum(matches*ncombo[i+3,:], dim=1)-(sz[i]*num_hi*has0)
+    #     tmp.append(tmpi/nmatch) #mean without zero
         
-    ncombo_avg = torch.stack([*ids[0], *tmp]) #add IDs back in
-    ncombo_avg = torch.unique(ncombo_avg, dim=1) #remove duplicates
+    # ncombo_avg = torch.stack([*ids[0], *tmp]) #add IDs back in
+    # ncombo_avg = torch.unique(ncombo_avg, dim=1) #remove duplicates
     
-    if len(ncombo_avg)==0: ncombo_avg = torch.zeros([5,0]).to(ncombo.device)
+    # if len(ncombo_avg)==0: ncombo_avg = torch.zeros([5,0]).to(ncombo.device)
+    
     
     # num_hi = torch.sum(matches*ncombo[-2,:]==sz[0]-1, dim=1)
     # has0 = torch.sum(matches*ncombo[-2,:]!=0, dim=1)!=nmatch
@@ -2114,10 +2240,18 @@ def test_num_junctions_through_time(ims):
 def find_juntion_neighbors(ncombo_avg):
     #For each junction, find the junctions that share exactly 2 IDs
     
-    ids = ncombo_avg[:3,].flatten()[None,]
-    adj_tmp = ids==ids.T #compare all ID values
-    tmp = ncombo_avg.shape[1]
-    adjacent = (adj_tmp.reshape(3,tmp,3,tmp).sum(0).sum(1))==2 #mark junctions that have exactly 2 IDs the same
+    ids = ncombo_avg[:3,]
+    log = []
+    for i in ids.T:
+        single = (ids.flatten()[None,]==i[:,None]).sum(0).reshape(3,-1).sum(0)
+        log.append(single)
+    adjacent = torch.stack(log)==2
+    
+    # ids = ncombo_avg[:3,:1000].flatten()[None,]
+    # adj_tmp = ids==ids.T #compare all ID values
+    # tmp = int(ids.shape[1]/3)
+    # adjacent = (adj_tmp.reshape(3,tmp,3,tmp).sum(0).sum(1))==2 #mark junctions that have exactly 2 IDs the same
+    
     return adjacent
 
 
@@ -2179,7 +2313,17 @@ def find_dihedral_angles(im, if_plot=False, num_plot_jct=10):
     
     # Find the edge indices that belong to each junction pair
     ncombo = find_ncombo(im, n=2) #find edge indicies
-    jpair_edges = torch.all(jpair_ids.T[:,:,None]==ncombo[:-2][None,], dim=1) #These don't neccesarily include the junctions yet, because junctions are an average of triplets that don't include just these two ids
+    
+    log = []
+    for i in range(jpair_ids.shape[1]):
+        jpair_id = jpair_ids[:,i][:,None]
+        jpair_edge = torch.all(jpair_id==ncombo[:-2], dim=0)
+        log.append(jpair_edge)
+    if len(log)==0: 
+        return None
+    else:
+        jpair_edges = torch.stack(log)
+    # jpair_edges = torch.all(jpair_ids[:,:100].T[:,:,None]==ncombo[:-2][None,], dim=1) #These don't neccesarily include the junctions yet, because junctions are an average of triplets that don't include just these two ids
     
     #Remove all of the jpairs that have any edge that has a length of four or less
     edges_len = my_batch(jpair_edges, torch.sum, 100)
@@ -2221,14 +2365,30 @@ def find_dihedral_angles(im, if_plot=False, num_plot_jct=10):
     points = points - points[0,:,:]
     x = points[...,0].T
     y = points[...,1].T
-    A = torch.stack([x, x**2, x**3]).permute(1,2,0)
+    A = torch.stack([x, x**2]).permute(1,2,0)
     B = y[...,None]
-    sx, rx0, _, _ = torch.linalg.lstsq(A, B)
+    log_sx = []
+    log_rx0 = []
+    for i in range(A.shape[0]):
+        sx, rx0, _, _ = torch.linalg.lstsq(A[i], B[i])
+        log_sx.append(sx)
+        log_rx0.append(rx0)
+    sx = torch.stack(log_sx)
+    rx0 = torch.stack(log_rx0)
+    # sx, rx0, _, _ = torch.linalg.lstsq(A, B)
     rx = ((torch.matmul(A,sx)-B)[...,0]**2).sum(1)[:,None]
     
-    A = torch.stack([y, y**2, y**3]).permute(1,2,0)
+    A = torch.stack([y, y**2]).permute(1,2,0)
     B = x[...,None]
-    sy, ry0, _, _ = torch.linalg.lstsq(A, B)
+    log_sy = []
+    log_ry0 = []
+    for i in range(A.shape[0]):
+        sy, ry0, _, _ = torch.linalg.lstsq(A[i], B[i])
+        log_sy.append(sy)
+        log_ry0.append(ry0)
+    sy = torch.stack(log_sy)
+    ry0 = torch.stack(log_ry0)
+    # sy, ry0, _, _ = torch.linalg.lstsq(A, B)
     ry = ((torch.matmul(A,sy)-B)[...,0]**2).sum(1)[:,None]
     
     # Find junction angles and then dihedral angles
@@ -2247,6 +2407,50 @@ def find_dihedral_angles(im, if_plot=False, num_plot_jct=10):
     dihedral_angles = calc_dihedral_angles(junction_angles)
     
     junction_ids = jpairs[0,:3].reshape(3,-1,3)[:,:,0]
+    
+    
+    
+    # iii = 560
+    
+    # sx[iii]
+    # rx[iii]
+    # sy[iii]
+    # ry[iii]
+    
+    # sy, ry0, _, _ = torch.linalg.lstsq(A[iii], B[iii]+0.5)
+    
+    # y_new = torch.linspace(-12,0,100).to(device)
+    # x_fit = sy[0]*y_new + sy[1]*y_new**2 + sy[2]*y_new**3
+    # plt.plot(y_new.cpu(), x_fit.cpu())
+    
+    # plt.plot(A[iii,:,0].cpu(), B[iii,:,0].cpu()+0.5,'.')
+    
+    
+    # dihedral_angles[:,186]
+    # iii = 275*3
+    # aaa = points[:,iii+1].cpu()
+    # bbb = points[:,iii+2].cpu()
+    
+    # plt.plot(bbb)
+    
+    # plt.plot(aaa[:,0],aaa[:,1],'.')
+    
+    # points[:,iii+1]-points[:,iii+2]
+    
+    
+    # junction_ids[:,275]
+
+    # im.shape
+    # plt.imshow(im[0,0].cpu()==514)  
+    # # plt.imshow(im[0,0].cpu()==3788) 
+    # # plt.imshow(im[0,0].cpu()==3878) 
+    # plt.xlim([100,200])
+    # plt.ylim([900,1000])
+    
+    #between 3788, 514
+    #either 826, 827
+    
+    
     
     # Plot junctions with edge indices and fit lines
     if if_plot:
@@ -2268,13 +2472,15 @@ def find_dihedral_angles(im, if_plot=False, num_plot_jct=10):
             x_tmp = points[...,0]
             x_fit = torch.stack([torch.linspace(torch.min(x_tmp[:,k]), torch.max(x_tmp[:,k]), 100) for k in range(x_tmp.shape[1])]).to(im.device)
             ss = sx[...,0]
-            y_fit = (ss[:,0:1]*x_fit + ss[:,1:2]*x_fit**2 + ss[:,2:]*x_fit**3 + y_os).T
+            # y_fit = (ss[:,0:1]*x_fit + ss[:,1:2]*x_fit**2 + ss[:,2:]*x_fit**3 + y_os).T
+            y_fit = (ss[:,0:1]*x_fit + ss[:,1:2]*x_fit**2 + y_os).T
             x_fit = (x_fit + x_os).T
             
             y_tmp = points[...,1]
             y0 = torch.stack([torch.linspace(torch.min(y_tmp[:,k]), torch.max(y_tmp[:,k]), 100) for k in range(y_tmp.shape[1])]).to(im.device)
             ss = sy[...,0]
-            x0 = (ss[:,0:1]*y0 + ss[:,1:2]*y0**2 + ss[:,2:]*y0**3 + x_os).T
+            # x0 = (ss[:,0:1]*y0 + ss[:,1:2]*y0**2 + ss[:,2:]*y0**3 + x_os).T
+            x0 = (ss[:,0:1]*y0 + ss[:,1:2]*y0**2 + x_os).T
             y0 = (y0 + y_os).T
             
             x_fit[:,i] = x0[:,i]
@@ -2359,15 +2565,43 @@ def num_diff_neighbors(ims, window_size=3, pad_mode='circular'):
     #window_size - the patch around each pixel that constitutes its neighbors
     #May need to add memory management through batches for large tensors in the future
     
+    
+    #NEW #!!!
     if type(window_size)==int: window_size = [window_size] #convert to "list" if "int" is given
     
-    ims_unfold = my_unfoldNd(ims, kernel_size=window_size, pad_mode=pad_mode)
-    center_pxl_ind = int(ims_unfold.shape[1]/2)
-    ims_diff_unfold = torch.sum(ims_unfold[:,center_pxl_ind,] != ims_unfold.transpose(0,1), dim=0) #shape = [N, dim1*dim2*dim3]
+    d = ims.dim()-2
+    kernel_sz = window_size*d
+    stride = (1,)*d
     
+    batch_sz = int(unfold_mem_lim/(torch.prod(torch.Tensor(kernel_sz))*64))
+    unfold_gen = unfold_in_batches(ims[0,0], batch_sz, kernel_sz, stride, pad_mode)
+    
+    log = []
+    for batch in unfold_gen:
+        im_unfold = batch.reshape(batch.shape[0],-1).T[None,]
+        center_pxl_ind = int(im_unfold.shape[1]/2)
+        tmp = torch.sum(im_unfold[:,center_pxl_ind,] != im_unfold.transpose(0,1), dim=0)
+        log.append(tmp)
+        
     if pad_mode==None: s = ims.shape[:2]+tuple(np.array(ims.shape[2:])-window_size+1)
     else: s = ims.shape
-    return ims_diff_unfold.reshape(s) #reshape to orignal image shape
+    ims_diff = torch.cat(log, dim=1).reshape(s) #misorientation image
+    
+    
+    #delete this later
+    # if type(window_size)==int: window_size = [window_size] #convert to "list" if "int" is given
+    
+    # ims_unfold = my_unfoldNd(ims, kernel_size=window_size, pad_mode=pad_mode)
+    # center_pxl_ind = int(ims_unfold.shape[1]/2)
+    # ims_diff_unfold = torch.sum(ims_unfold[:,center_pxl_ind,] != ims_unfold.transpose(0,1), dim=0) #shape = [N, dim1*dim2*dim3]
+    
+    # if pad_mode==None: s = ims.shape[:2]+tuple(np.array(ims.shape[2:])-window_size+1)
+    # else: s = ims.shape
+    
+    # ims_diff = ims_diff_unfold.reshape(s) 
+    
+    
+    return ims_diff
 
 
 def num_diff_neighbors_inline(ims_unfold): 
@@ -2387,43 +2621,18 @@ def compute_action_energy_change(im, im_next, energy_dim=3, act_dim=9, pad_mode=
     
     num_dims = im.dim()-2
     
-    
-    
-    
-    #delete later
-    # windows_curr_obs = my_unfoldNd(im_next, kernel_size=energy_dim, pad_mode=pad_mode) 
-    # windows_curr_obs = windows_curr_obs.reshape(1,9,62,62)[:,:,7:-7,7:-7].reshape(1,9,-1) 
-    # current_energy = num_diff_neighbors_inline(windows_curr_obs)
-    # windows_curr_act = my_unfoldNd(im, kernel_size=act_dim, pad_mode=pad_mode)
-    # windows_next_obs = my_unfoldNd(im_next, kernel_size=energy_dim, pad_mode=pad_mode)
-    # windows_next_obs = windows_next_obs.reshape(1,9,62,62)[:,:,7:-7,7:-7].reshape(1,9,-1)
-    
-    #NEW
-    t = np.array(im.shape)
-    t[1] = int(energy_dim)**num_dims
-    t[2:] = t[2:] - int(energy_dim/2)*2
-    t = tuple(t)
-    c = int(act_dim/2)-int(energy_dim/2)
-    cc = [slice(None),]*2 + [slice(c,-c),]*num_dims
-    
     windows_curr_obs = my_unfoldNd(im_next, kernel_size=energy_dim, pad_mode=pad_mode) 
-    windows_curr_obs = windows_curr_obs.reshape(t)[cc].reshape(t[:2]+(-1,)) 
-    current_energy = num_diff_neighbors_inline(windows_curr_obs)
-    windows_curr_act = my_unfoldNd(im, kernel_size=act_dim, pad_mode=pad_mode)
-    windows_next_obs = my_unfoldNd(im_next, kernel_size=energy_dim, pad_mode=pad_mode)
-    windows_next_obs = windows_next_obs.reshape(t)[cc].reshape(t[:2]+(-1,)) 
-    
-    
-    
-    
+    current_energy = num_diff_neighbors_inline(windows_curr_obs) #torch.Size([1, 66049])
+    windows_curr_act = my_unfoldNd(im, kernel_size=act_dim, pad_mode=pad_mode) #torch.Size([1, 289, 66049])
+    windows_next_obs = my_unfoldNd(im_next, kernel_size=energy_dim, pad_mode=pad_mode) #torch.Size([1, 9, 66049])
     
     ll = []
     for i in range(windows_curr_act.shape[1]):
         windows_next_obs[:,int(energy_dim**num_dims/2),:] = windows_curr_act[:,i,:]
         ll.append(num_diff_neighbors_inline(windows_next_obs))
-    action_energy = torch.cat(ll)[...,None]
+    action_energy = torch.cat(ll)[...,None] #torch.Size([289, 66049, 1])
     
-    energy_change = (current_energy.transpose(0,1)-action_energy)/(energy_dim**num_dims-1)
+    energy_change = (current_energy.transpose(0,1)[None,]-action_energy)/(energy_dim**num_dims-1) #torch.Size([289, 66049, 1])
     
     return energy_change
     
@@ -2435,7 +2644,7 @@ def compute_energy_labels(im_seq, act_dim=9, pad_mode="circular"):
     
     # CALCULATE ALL THE ACTION ENERGY CHANGES
     energy_changes = []
-    for i in range(im_seq.shape[0]-1):
+    for i in range(im_seq.shape[0]-1): 
         ims_curr = im_seq[i].unsqueeze(0) 
         ims_next = im_seq[i+1].unsqueeze(0)
         energy_change = compute_action_energy_change(ims_curr, ims_next, act_dim=act_dim, pad_mode=pad_mode)
@@ -2450,41 +2659,58 @@ def compute_energy_labels(im_seq, act_dim=9, pad_mode="circular"):
     return energy_labels
 
 
-def compute_energy_labels2(im_seq, act_dim=9, energy_dim=3, pad_mode="circular"):
-    window_act = my_unfoldNd(im_seq[0:1,], kernel_size=act_dim, pad_mode=pad_mode)[0]
-    window_act2 = my_unfoldNd(im_seq[0:1,], kernel_size=energy_dim, pad_mode=pad_mode)[0]
-    tmp = (window_act2[None,]==window_act[:,None,]).permute(2,1,0)
-    energy_labels = my_batch(tmp, torch.sum, batch_sz=100).reshape(-1,17,17)/(energy_dim**2)
-    return energy_labels.to(im_seq.device)
+def compute_energy_labels_gen(im_seq, batch_sz, act_dim=9, energy_dim=3, pad_mode="circular"): #!!! NEW
+    #Computes energy labels used for PRIMME regularization
+    #Yields in batches to conserve memory
+    #Find possible actions around each pixel in a "act_dim" neighborhood
+    #Compute number of different neighbors as energy using a "energy_dim" neighborhood
+    #Energy labels are the change in energy for each possible action (initial minus action energy)
+    #Repeat for each future step and sum together with a discount of 1/2
+    
+    #Find parameters
+    num_fut = im_seq.shape[0]-1 #number of future steps
+    d = im_seq.dim()-2 #number of dimensions
+    stride = [num_fut,]+[1,]*d 
+    num_iter = int(np.ceil(np.prod(im_seq.shape[1:])/batch_sz))
+    
+    #Find current energy
+    log = []
+    for im in im_seq[1:]: 
+         log.append(num_diff_neighbors(im[None,], window_size=energy_dim, pad_mode=pad_mode))
+    current_energy = torch.cat(log).reshape(num_fut,-1).T
+    
+    #Create generators
+    current_energy_split = current_energy.split(batch_sz)
+    windows_curr_act_gen = unfold_in_batches(im_seq[:-1,0], batch_sz, [num_fut]+[act_dim,]*d, stride, pad_mode)
+    windows_next_obs_gen = unfold_in_batches(im_seq[1:,0], batch_sz, [num_fut]+[energy_dim,]*d, stride, pad_mode)
+    
+    #Yield the energy labels for each batch
+    for i in range(num_iter):
+        current_energy = current_energy_split[i]
+        windows_curr_act = next(windows_curr_act_gen).reshape(-1, num_fut, act_dim**d).unsqueeze(3)
+        windows_next_obs = next(windows_next_obs_gen).reshape(-1, num_fut, energy_dim**d).unsqueeze(2)#.repeat(1,1,windows_curr_act.shape[-1],1)
+        tmp = windows_next_obs != windows_curr_act 
+        action_energy = tmp.sum(-1) - tmp[..., int(energy_dim**d/2)].int() 
+        energy_change = (current_energy[..., None]-action_energy)/(energy_dim**d-1)
+        
+        decay_rate = 1/2
+        decay = decay_rate**torch.arange(1,im_seq.shape[0]).reshape(1,-1,1).to(im_seq.device)
+        energy_labels = (energy_change*decay).sum(1).reshape((-1,)+(act_dim,)*(im_seq.dim()-2))
+        
+        yield energy_labels
 
 
 def compute_action_labels(im_seq, act_dim=9, pad_mode="circular"):
     #Label which actions in each action window were actually taken between the first image and all following
     #The total energy label is a decay sum of those action labels
-
+    
     sz = im_seq.shape
-    num_dims = len(sz)-2
     im = im_seq[0:1,]
     ims_next = im_seq[1:]
     
     # CALCULATE ACTION LABELS
     window_act = my_unfoldNd(im, kernel_size=act_dim, pad_mode=pad_mode)[0]
     ims_next_flat = ims_next.view(ims_next.shape[0], -1)
-    
-    
-    
-    
-    #delete later
-    # ims_next_flat = ims_next_flat.reshape(-1,64,64)[:,8:-8,8:-8].reshape(-1,48*48)
-    
-    #NEW
-    c = int(act_dim/2)
-    cc = [slice(None),]*1 + [slice(c,-c),]*num_dims
-    ims_next_flat = ims_next_flat.reshape((-1,)+sz[2:])[cc].reshape(sz[0]-1,-1) 
-    
-    
-    
-    
     actions_marked = window_act.unsqueeze(0).expand(sz[0]-1,-1,-1)==ims_next_flat.unsqueeze(1) #Mark the actions that matches each future image (the "action taken")
     decay_rate = 1/2
     decay = decay_rate**torch.arange(1,im_seq.shape[0]).reshape(-1,1,1).to(im.device)
@@ -2493,7 +2719,35 @@ def compute_action_labels(im_seq, act_dim=9, pad_mode="circular"):
     return action_labels
 
 
-def compute_labels(im_seq, obs_dim=9, act_dim=9, reg=1, pad_mode="circular"):
+def compute_action_labels_gen(im_seq, batch_sz, act_dim=9, pad_mode="circular"): #!!! NEW
+    #Label which actions in each action window were actually taken between the first image and all following
+    #The total energy label is a decay sum of those action labels
+    
+    #Find parameters
+    num_fut = im_seq.shape[0]-1 #number of future steps
+    d = im_seq.dim()-2 #number of dimensions
+    num_iter = int(np.ceil(np.prod(im_seq.shape[1:])/batch_sz))
+    
+    #Create generators
+    im = im_seq[0:1,]
+    ims_next = im_seq[1:].reshape(num_fut,-1).T
+    ims_next_split = ims_next.split(batch_sz)
+    window_act_gen = unfold_in_batches(im[0,0,], batch_sz, [act_dim,]*d, [1,]*d, pad_mode)
+    
+    #Yield the energy labels for each batch
+    for i in range(num_iter):
+        ims_next = ims_next_split[i]
+        window_act = next(window_act_gen).reshape(-1,act_dim**d)
+        actions_marked = window_act.unsqueeze(1) == ims_next.unsqueeze(2)
+        
+        decay_rate = 1/2
+        decay = decay_rate**torch.arange(1,im_seq.shape[0]).reshape(1,-1,1).to(im_seq.device)
+        action_labels = (actions_marked*decay).sum(1).reshape((-1,)+(act_dim,)*(im_seq.dim()-2))
+            
+        yield action_labels
+    
+    
+def compute_labels(im_seq, act_dim=9, reg=1, pad_mode="circular"):
     energy_labels = compute_energy_labels(im_seq, act_dim=act_dim, pad_mode=pad_mode)
     action_labels = compute_action_labels(im_seq, act_dim=act_dim, pad_mode=pad_mode)
     
@@ -2508,6 +2762,23 @@ def compute_labels(im_seq, obs_dim=9, act_dim=9, reg=1, pad_mode="circular"):
     return labels
 
 
+def compute_labels_gen(im_seq, batch_sz, act_dim=9, energy_dim=3, reg=1, pad_mode="circular"): #!!! NEW 
+        
+    #Find parameters
+    num_iter = int(np.ceil(np.prod(im_seq.shape[1:])/batch_sz))
+    
+    #Create generators
+    energy_labels_gen = compute_energy_labels_gen(im_seq, batch_sz, act_dim, energy_dim, pad_mode)
+    action_labels_gen = compute_action_labels_gen(im_seq, batch_sz, act_dim, pad_mode)
+    
+    #Yield the energy labels for each batch
+    for i in range(num_iter):
+        energy_labels = next(energy_labels_gen)
+        action_labels = next(action_labels_gen)
+        labels = action_labels + reg*energy_labels
+        yield labels
+    
+
 def my_normalize(data):
     mi = torch.min(data)
     ma = torch.max(data)
@@ -2518,6 +2789,16 @@ def compute_features(im, obs_dim=9, pad_mode='circular'):
     local_energy = num_diff_neighbors(im, window_size=7, pad_mode=pad_mode)
     features = my_unfoldNd(local_energy.float(), obs_dim, pad_mode=pad_mode).T.reshape((-1,)+(obs_dim,)*(im.dim()-2))
     return features
+
+
+def compute_features_gen(im, batch_sz, obs_dim=9, pad_mode='circular'): #NEW #!!!
+    local_energy = num_diff_neighbors(im, window_size=7, pad_mode=pad_mode)
+    
+    d = local_energy.dim()-2
+    unfold_gen = unfold_in_batches(local_energy[0,0], batch_sz, [obs_dim,]*d, (1,)*d, pad_mode)
+    
+    for batch in unfold_gen:
+        yield batch
 
 
 
@@ -2545,11 +2826,9 @@ def compute_action_energy_change_miso(im, im_next, miso_matrix, energy_dim=3, ac
     num_dims = len(im.shape)-2
     
     windows_curr_obs = my_unfoldNd(im_next, kernel_size=energy_dim, pad_mode=pad_mode) 
-    windows_curr_obs = windows_curr_obs.reshape(1,9,62,62)[:,:,7:-7,7:-7].reshape(1,9,-1) #!!! hardcoded
     current_energy = neighborhood_miso_inline(windows_curr_obs, miso_matrix)
     windows_curr_act = my_unfoldNd(im, kernel_size=act_dim, pad_mode=pad_mode)
     windows_next_obs = my_unfoldNd(im_next, kernel_size=energy_dim, pad_mode=pad_mode)
-    windows_next_obs = windows_next_obs.reshape(1,9,62,62)[:,:,7:-7,7:-7].reshape(1,9,-1) #!!! hardcoded
     
     ll = []
     for i in range(windows_curr_act.shape[1]):
@@ -2604,3 +2883,14 @@ def compute_features_miso(im, miso_matrix, obs_dim=9, pad_mode='circular'):
     features = my_unfoldNd(local_energy.float(), obs_dim, pad_mode=pad_mode).T.reshape((-1,)+(obs_dim,)*(im.dim()-2))
     
     return features
+
+
+def compute_features_miso_gen(im, batch_sz, miso_matrix, obs_dim=9, pad_mode='circular'): #NEW #!!!
+    local_energy = neighborhood_miso(im, miso_matrix, window_size=7, pad_mode=pad_mode)
+    # local_energy = neighborhood_miso_spparks(im, miso_matrix, window_size=7, pad_mode=pad_mode)
+    
+    d = local_energy.dim()-2
+    unfold_gen = unfold_in_batches(local_energy[0,0], batch_sz, [obs_dim,]*d, (1,)*d, pad_mode)
+      
+    for batch in unfold_gen:
+        yield batch

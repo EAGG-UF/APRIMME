@@ -225,7 +225,7 @@ plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/hex.png', bbox_inches
 plt.show()
     
     
-    
+
 ### 2D isotropic <R>^2 vs time, number of grains vs time (AP0, AP25, MCP) #!!!
 
 fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
@@ -294,30 +294,58 @@ t_pa = np.arange(si-s0)*scale
 ng_pa = ng[s0:si]
 r2_pa = r2
 
-plt.figure(figsize=[sw,sh], dpi=600)
+# plt.figure(figsize=[sw,sh], dpi=600)
+# plt.rcParams['font.size'] = 8
+# plt.plot(t_m, r2_m*1e-12, '-')
+# plt.plot(t_ma, r2_ma*1e-12, '-')
+# plt.plot(t_p, r2_p*1e-12, '--')
+# plt.plot(t_pa, r2_pa*1e-12, '-.')
+# plt.xlabel('Time (unitless)')
+# plt.ylabel('$<R>^2$ ($m^2$)')
+# if if_leg: plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'])
+# plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_r2_vs_time.png', bbox_inches='tight', dpi=600)
+# plt.show()
+
+# plt.figure(figsize=[3,2], dpi=600)
+# plt.rcParams['font.size'] = 8
+# plt.plot(t_m, r2_m*1e-12, '-')
+# plt.plot(t_ma, r2_ma*1e-12, '-')
+# plt.plot(t_p*.93, r2_p*1e-12-.12e-9, '--')
+# plt.plot(t_pa*.89 ,r2_pa*1e-12-.19e-9, '-.')
+# plt.xlabel('Time (unitless)')
+# plt.ylabel('$<R>^2$ ($m^2$)')
+# if if_leg: plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'])
+# plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_r2_vs_time2.png', bbox_inches='tight', dpi=600)
+# plt.show()
+
+plt.figure(figsize=[5,1.5], dpi=600)
 plt.rcParams['font.size'] = 8
+plt.subplot(1,3,1)
 plt.plot(t_m, r2_m*1e-12, '-')
 plt.plot(t_ma, r2_ma*1e-12, '-')
 plt.plot(t_p, r2_p*1e-12, '--')
 plt.plot(t_pa, r2_pa*1e-12, '-.')
 plt.xlabel('Time (unitless)')
 plt.ylabel('$<R>^2$ ($m^2$)')
-if if_leg: plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'])
-plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_r2_vs_time.png', bbox_inches='tight', dpi=600)
-plt.show()
+plt.ylim([-1.08e-10, 1.06e-09])
 
-plt.figure(figsize=[3,2], dpi=600)
-plt.rcParams['font.size'] = 8
+plt.subplot(1,3,2)
 plt.plot(t_m, r2_m*1e-12, '-')
 plt.plot(t_ma, r2_ma*1e-12, '-')
 plt.plot(t_p*.93, r2_p*1e-12-.12e-9, '--')
 plt.plot(t_pa*.89 ,r2_pa*1e-12-.19e-9, '-.')
 plt.xlabel('Time (unitless)')
-plt.ylabel('$<R>^2$ ($m^2$)')
-if if_leg: plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'])
-plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_r2_vs_time2.png', bbox_inches='tight', dpi=600)
-plt.show()
+# plt.ylabel('$<R>^2$ ($m^2$)')
+plt.ylim([-1.08e-10, 1.06e-09])
+plt.tick_params(bottom=True, left=True,labelleft=False, labelbottom=True)
 
+plt.subplot(1,3,3)
+plt.axis('off')
+plt.plot(0,0, '-'); plt.plot(0,0, '-'); plt.plot(0,0, '--'); plt.plot(0,0, '-.')
+plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'], loc=10, fontsize=8)
+plt.tight_layout()
+plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/r2_vs_time.png', bbox_inches='tight', dpi=600)
+plt.show()
 
 
 ### Average number of sides through time (AP0, AP25, SPPARKS, PF) #!!!
@@ -344,16 +372,17 @@ fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(25).
 with h5py.File(fp, 'r') as f:
     gsa_pa = f['sim3/grain_sides_avg'][:500]
 
-plt.figure(figsize=[sw,sh], dpi=600)
+plt.figure(figsize=[3,2], dpi=600)
 plt.rcParams['font.size'] = 8
-plt.plot(gsa_m, '-')
-plt.plot(gsa_ma, '-')
-plt.plot(gsa_p, '--')
-plt.plot(gsa_pa, '-.')
+plt.plot(gsa_m, 'C0-', linewidth=2, zorder=10)
+plt.plot(gsa_ma, 'C1-', linewidth=1, zorder=11)
+plt.plot(gsa_p, 'C2--', linewidth=1, zorder=0)
+plt.plot(gsa_pa, 'C3-.', linewidth=1, zorder=0)
 plt.xlabel('Number of Frames')
 plt.ylabel('Avg Number \nof Sides')
 if if_leg: plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'])
-plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_num_sides_vs_time.png', bbox_inches='tight', dpi=600)
+plt.tight_layout()
+plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/sides_vs_time.png', bbox_inches='tight', dpi=600)
 plt.show()
 
 # plt.figure(figsize=[sw,sh], dpi=600)
@@ -372,7 +401,9 @@ plt.show()
 
 ### 2D isotropic normalized radius distribution (AP0, AP25, MCP, PF, Yadav, Zollinger) #!!!
 
-for num_grains in [4000, 3000, 2000]: #4000, 3000, 2000
+plt.figure(figsize=[6.5,6], dpi=600)
+plt.rcParams['font.size'] = 8
+for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
 
     fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
     with h5py.File(fp, 'r') as f:
@@ -430,29 +461,36 @@ for num_grains in [4000, 3000, 2000]: #4000, 3000, 2000
     
     x_zol, h_zol = np.loadtxt('../../MF/data/previous_figures/Results.csv', delimiter=',',skiprows=1).T
     
-
-    # plt.figure(figsize=[sw,sh], dpi=600)
-    plt.figure(dpi=600)
-    plt.rcParams['font.size'] = 8
+    plt.subplot(4,3,ii+1)
     plt.plot(x_m, h_m, 'C0')
     plt.plot(x_ma, h_ma, 'C0--')
     plt.plot(x_p, h_p, 'C1')
     plt.plot(x_pa, h_pa, 'C1--')
-    plt.plot(x_yad, h_yad, '*', ms = 10)
-    plt.plot(x_zol, h_zol, 'd', ms = 10)
-    plt.xlabel('$R/<R>$ - Normalized Radius')
-    plt.ylabel('Frequency')
+    plt.plot(x_yad, h_yad, 'C2*', ms = 4)
+    plt.plot(x_zol, h_zol, 'C3d', ms = 4)
+    if ii==1: plt.xlabel('$R/<R>$ - Normalized Radius')
+    if ii==0: plt.ylabel('Frequency')
+    else: plt.tick_params(bottom=True, left=True,labelleft=False, labelbottom=True)
     plt.xlim([0,3])
     plt.ylim([0,1.2])
-    if if_leg: plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)','Yadav 2018', 'Zollner 2016'])
-    plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_r_dist%d.png'%num_grains, bbox_inches='tight', dpi=600)
-    plt.show()
+    plt.title('Grains: %d'%num_grains)
+
+# plt.subplot(1,4,4)
+# plt.axis('off')
+# plt.plot(0,0, 'C0'); plt.plot(0,0, 'C0--'); plt.plot(0,0, 'C1'); plt.plot(0,0, 'C1--'); plt.plot(0,0, '*'); plt.plot(0,0, 'd')
+# plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)','Yadav 2018', 'Zollner 2016'], loc=10, framealpha=1)
+
+# plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/r2_dists.png', bbox_inches='tight', dpi=600)
+# plt.show()
 
 
 
 ### 2D isotropic number of sides distribution (AP0, AP25, MCP, PF, Yadav, Mason) #!!!
 
-for num_grains in [4000, 3000, 2000]: #4000, 3000, 2000
+
+# plt.figure(figsize=[6.5,1.5], dpi=600)
+# plt.rcParams['font.size'] = 8
+for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
     
     fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
     with h5py.File(fp, 'r') as f:
@@ -506,23 +544,109 @@ for num_grains in [4000, 3000, 2000]: #4000, 3000, 2000
     
     x_mas, h_mas = np.loadtxt('../../MF/data/previous_figures_sides/ResultsMasonLazar2DGTD.txt').T
     
-    # plt.figure(figsize=[sw,sh], dpi=600)
-    plt.figure(dpi=600)
-    plt.rcParams['font.size'] = 8
+    plt.subplot(4,3,ii+4)
     plt.plot(x_m, h_m, 'C0')
     plt.plot(x_ma, h_ma, 'C0--')
     plt.plot(x_p, h_p, 'C1')
     plt.plot(x_pa, h_pa, 'C1--')
-    plt.plot(x_yad, h_yad, '*', ms = 10)
-    plt.plot(x_mas, h_mas, 'd', ms = 10)
-    plt.xlabel('Number of Sides')
-    plt.ylabel('Frequency')
+    plt.plot(x_yad, h_yad, 'C2*', ms = 4)
+    plt.plot(x_mas, h_mas, 'C4^', ms = 4)
+    if ii==1: plt.xlabel('Number of Sides')
+    if ii==0: plt.ylabel('Frequency')
+    else: plt.tick_params(bottom=True, left=True,labelleft=False, labelbottom=True)
     plt.xlim([0,15])
-    plt.ylim([0,0.4])
-    if if_leg: plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)','Yadav 2018', 'Masson 2015'])
-    plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_num_sides_dist%d.png'%num_grains, bbox_inches='tight', dpi=600)
-    plt.show()
+    plt.ylim([0,0.35])
+    # plt.title('Grains: %d'%num_grains)
+    
+# plt.subplot(1,4,4)
+# plt.axis('off')
+# plt.plot(0,0, 'C0'); plt.plot(0,0, 'C0--'); plt.plot(0,0, 'C1'); plt.plot(0,0, 'C1--'); plt.plot(0,0, '*'); plt.plot(0,0, 'd')
+# plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)','Yadav 2018', 'Masson 2015'], loc=10, framealpha=1)
 
+# plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/num_sides_dists.png', bbox_inches='tight', dpi=600)
+# plt.show()
+
+
+
+### Compare dihedral angle distributions at different numbers of grains #!!!
+
+bins = np.linspace(40,200,50)
+x = bins[:-1]+np.diff(bins)/2
+
+# plt.figure(figsize=[6.5,1.5], dpi=600)
+# plt.rcParams['font.size'] = 8
+for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
+
+    fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
+    with h5py.File(fp, 'r') as f:
+        grain_areas = f['sim0/grain_areas'][:]
+        n = (grain_areas!=0).sum(1)
+        j = np.argmin(np.abs(n-num_grains))
+        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
+    _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
+    h_m, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
+
+    fp = './data/spparks_sz(2400x2400)_ng(20000)_nsteps(2001)_freq(1.0)_kt(0.66)_cut(25).h5'
+    with h5py.File(fp, 'r') as f:
+        grain_areas = f['sim0/grain_areas'][:]
+        n = (grain_areas!=0).sum(1)
+        j = np.argmin(np.abs(n-num_grains))
+        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
+    _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
+    h_ma, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
+    
+    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T0R0)_cut(0).h5'
+    # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
+    with h5py.File(fp, 'r') as f:
+        grain_areas = f['sim0/grain_areas'][:]
+        n = (grain_areas!=0).sum(1)
+        j = np.argmin(np.abs(n-num_grains))
+        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
+    _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
+    h_p, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
+    
+    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T25R25)_cut(25).h5'
+    # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
+    with h5py.File(fp, 'r') as f:
+        grain_areas = f['sim0/grain_areas'][:]
+        n = (grain_areas!=0).sum(1)
+        j = np.argmin(np.abs(n-num_grains))
+        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
+    _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
+    h_pa, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
+    
+    
+    plt.subplot(4,3,ii+7)
+    plt.plot(x, h_m, 'C0')
+    plt.plot(x, h_ma, 'C0--')
+    plt.plot(x, h_p, 'C1')
+    plt.plot(x, h_pa, 'C1--')
+    if ii==1: plt.xlabel('Dihedral Angle Distribution')
+    if ii==0: plt.ylabel('Frequency')
+    else: plt.tick_params(bottom=True, left=True,labelleft=False, labelbottom=True)
+    plt.ylim([0,0.03])
+    # plt.title('Grains: %d'%num_grains)
+    
+# plt.subplot(1,4,4)
+# plt.axis('off')
+# plt.plot(0,0, 'C0'); plt.plot(0,0, 'C0--'); plt.plot(0,0, 'C1'); plt.plot(0,0, 'C1--'); plt.plot(0,0, '*'); plt.plot(0,0, 'd')
+# plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'], loc=10, framealpha=1)
+
+# plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/da_dists.png', bbox_inches='tight', dpi=600)
+# plt.show()
+
+# plt.figure(figsize=[6.5,2], dpi=600)
+# plt.rcParams['font.size'] = 8
+plt.subplot(4,3,11)
+plt.axis('off')
+plt.plot(0,0, 'C0'); plt.plot(0,0, 'C0--'); plt.plot(0,0, 'C1'); 
+plt.plot(0,0, 'C1--'); plt.plot(0,0, 'C2*'); plt.plot(0,0, 'C3d'); plt.plot(0,0, 'C4^')
+plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)', 'Yadav 2018', 'Zollner 2016', 'Masson 2015'], loc=10, framealpha=1)
+
+plt.tight_layout()
+plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/dists.png', bbox_inches='tight', dpi=600)
+plt.show()
+    
 
 
 ### 2D isotropic microstructure comparisons (MF, MCP, PF) #!!!
@@ -583,70 +707,9 @@ for i in range(len(num_grains)):
     plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
     if i==0: plt.ylabel('APRIMME (cut=25)', fontsize=8)
     
-    
-    # plt.imshow(np.fliplr(im_pf), interpolation='none')
-    plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_comp.png', bbox_inches='tight', dpi=600)
+plt.tight_layout()
+plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_comp.png', bbox_inches='tight', dpi=600)
 plt.show()
-
-
-
-### Compare dihedral angle distributions at different numbers of grains #!!!
-
-bins = np.linspace(40,200,50)
-x = bins[:-1]+np.diff(bins)/2
-
-for num_grains in [4000, 3000, 2000]: #4000, 3000, 2000
-
-    fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
-    with h5py.File(fp, 'r') as f:
-        grain_areas = f['sim0/grain_areas'][:]
-        n = (grain_areas!=0).sum(1)
-        j = np.argmin(np.abs(n-num_grains))
-        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
-    _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
-    h_m, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
-
-    fp = './data/spparks_sz(2400x2400)_ng(20000)_nsteps(2001)_freq(1.0)_kt(0.66)_cut(25).h5'
-    with h5py.File(fp, 'r') as f:
-        grain_areas = f['sim0/grain_areas'][:]
-        n = (grain_areas!=0).sum(1)
-        j = np.argmin(np.abs(n-num_grains))
-        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
-    _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
-    h_ma, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
-    
-    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T0R0)_cut(0).h5'
-    # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
-    with h5py.File(fp, 'r') as f:
-        grain_areas = f['sim0/grain_areas'][:]
-        n = (grain_areas!=0).sum(1)
-        j = np.argmin(np.abs(n-num_grains))
-        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
-    _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
-    h_p, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
-    
-    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T25R25)_cut(25).h5'
-    # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
-    with h5py.File(fp, 'r') as f:
-        grain_areas = f['sim0/grain_areas'][:]
-        n = (grain_areas!=0).sum(1)
-        j = np.argmin(np.abs(n-num_grains))
-        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
-    _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
-    h_pa, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
-    
-    # plt.figure(figsize=[sw,sh], dpi=600)
-    plt.figure(dpi=600)
-    plt.rcParams['font.size'] = 8
-    plt.plot(x, h_m, 'C0')
-    plt.plot(x, h_ma, 'C0--')
-    plt.plot(x, h_p, 'C1')
-    plt.plot(x, h_pa, 'C1--')
-    plt.xlabel('Dihedral Angle Distribution')
-    plt.ylabel('Frequency')
-    plt.legend(['MCP (cut=0)', 'MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'], fontsize=7)
-    plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_da_dist%d.png'%num_grains, bbox_inches='tight', dpi=600)
-    plt.show()
 
 
 
@@ -679,17 +742,7 @@ with h5py.File(fp, 'r') as f:
     msa_pa = f['sim0/ims_miso_avg'][:1000]
     ng_pa = (f['sim0/grain_areas'][:1000]!=0).sum(1)
 
-plt.figure(figsize=[3,2], dpi=600)
-plt.rcParams['font.size'] = 8
-plt.plot(das_ma-das_m, 'C0.', ms=3)
-plt.plot(das_pa-das_p, 'C1^', ms=3)
-plt.plot([0,1000],[(das_ma-das_m).mean(),]*2, 'k--',linewidth=2)
-plt.plot([0,1000],[(das_pa-das_p).mean(),]*2, 'k--',linewidth=2)
-plt.ylabel('Dihehedral Angle\nSTD Difference')
-plt.xlabel('Number of Frames')
-plt.legend(['MCP - Mean: %1.2f'%((das_ma-das_m).mean()), 'APRIMME - Mean: %1.2f'%((das_pa-das_p).mean())], fontsize=7, loc='best')
-plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/da_std_time.png', bbox_inches='tight', dpi=600)
-plt.show()
+
 
 
 
@@ -720,23 +773,70 @@ with h5py.File(fp, 'r') as f:
     ng_pa = (f['sim3/grain_areas'][:]!=0).sum(1)
 
 
-plt.figure(figsize=[3,2], dpi=600)
+
+
+plt.figure(figsize=[6.5,4], dpi=600)
 plt.rcParams['font.size'] = 8
+
+plt.subplot(2,2,1)
+plt.plot(das_m, 'C0-')
+plt.plot(das_ma, 'C1--')
+plt.plot(das_p, 'C2-')
+plt.plot(das_pa, 'C3--')
+plt.title('Dihedral Angles')
+plt.ylabel('STD')
+plt.tick_params(bottom=True, left=False,labelleft=True, labelbottom=False)
+plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'], loc='best')
+
+plt.subplot(2,2,3)
+plt.plot(das_ma-das_m, 'C0.', ms=3)
+plt.plot(das_pa-das_p, 'C1^', ms=3)
+plt.plot([0,1000],[(das_ma-das_m).mean(),]*2, 'k--',linewidth=2)
+plt.plot([0,1000],[(das_pa-das_p).mean(),]*2, 'k--',linewidth=2)
+plt.ylabel('Difference in STD')
+plt.xlabel('Number of Frames')
+plt.ylim([-1,8])
+plt.legend(['MCP - Mean: %1.2f'%((das_ma-das_m).mean()), 'APRIMME - Mean: %1.2f'%((das_pa-das_p).mean())], fontsize=7, loc='best')
+
+plt.subplot(2,2,2)
+plt.plot(msa_m, 'C0-')
+plt.plot(msa_ma, 'C1--')
+plt.plot(msa_p, 'C2-')
+plt.plot(msa_pa, 'C3--')
+plt.title('Neighborhood Misorientation')
+plt.ylabel('Mean without Zeros')
+plt.ylim([1.55, 1.90])
+plt.tick_params(bottom=True, left=False,labelleft=True, labelbottom=False)
+plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'], loc='best')
+
+plt.subplot(2,2,4)
 plt.plot(msa_ma-msa_m, 'C0.', ms=3)
 plt.plot(msa_pa-msa_p, 'C1^', ms=3)
 plt.plot([0,500],[(msa_ma-msa_m).mean(),]*2, 'k--',linewidth=2)
 plt.plot([0,500],[(msa_pa-msa_p).mean(),]*2, 'k--',linewidth=2)
-plt.ylabel('Mean Misorientation\nDifference')
+plt.ylabel('Difference in Mean')
 plt.xlabel('Number of Frames')
 plt.legend(['MCP - Mean: %1.2f'%((msa_ma-msa_m).mean()), 'APRIMME - Mean: %1.2f'%((msa_pa-msa_p).mean())], fontsize=7, loc='best')
-plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/miso_mean_time.png', bbox_inches='tight', dpi=600)
+
+plt.tight_layout()
+plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/da_and_miso_differences.png', bbox_inches='tight', dpi=600)
 plt.show()
 
 
 
 
 
-### 2D Dihedral STD through time (iso vs ani) #!!!
+
+
+
+
+
+
+
+
+
+
+### 2D Dihedral STD through time (iso vs ani) 
 
 # n0 = 5000
 # n1 = 2000
@@ -794,7 +894,7 @@ plt.show()
 
 
 
-# ### Average miso through time  #!!!
+# ### Average miso through time  
 
 # with h5py.File('./data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0).h5', 'r') as f:
 #     print(f['sim0'].keys())

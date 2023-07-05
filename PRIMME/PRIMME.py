@@ -41,6 +41,9 @@ class PRIMME(nn.Module):
         self.training_acc = []
         self.validation_acc = []
         
+        self.log0 = []
+        self.log1 = []
+        
         # DEFINE NEURAL NETWORK
         self.f1 = nn.Linear(self.obs_dim ** self.num_dims, 21 * 21 * 4)
         self.f2 = nn.Linear(21 * 21 * 4, 21 * 21 * 2)
@@ -111,8 +114,7 @@ class PRIMME(nn.Module):
         else:
             self.miso_matrix = None
             self.miso_matrix_val = None
-        
-
+      
     def step(self, im_seq, miso_matrix=None, unfold_mem_lim=4e9):
         #"im_seq" can be of shape=[1,1,dim0,dim1,dim2] or a sequence of shape=[num_future, 1, dim0, dim1, dim2]
         #Find the image after "im" given the trained model
@@ -144,6 +146,10 @@ class PRIMME(nn.Module):
         accuracy = 0
         num_features = 0
         im_next_log = []
+        
+        log0 = []
+        log1 = []
+        
         for i in range(num_iter):
             
             # Only use neighborhoods that have more than one ID (have a potential to change ID)
@@ -166,6 +172,21 @@ class PRIMME(nn.Module):
             next_ids = current_ids.clone()
             next_ids[use_i] = im_unfold[use_i,][torch.arange(len(use_i)),switch_i]
             im_next_log.append(next_ids)
+            
+            
+            #what is the mean of the outputs
+            # ooo = outputs_rot
+            # ooo = outputs
+            
+            # tmp = ooo.mean(0).reshape(17,17).detach().cpu()
+            # aaa = np.stack((np.average(np.arange(17), weights=tmp.sum(0)), np.average(np.arange(17), weights=tmp.sum(1))))-8
+            # log0.append(aaa)
+            
+            # m = ooo.max(1)[0]
+            # tmp = (m[:,None]==ooo).sum(0).reshape(17,17).cpu()
+            # bbb = np.stack((np.average(np.arange(17), weights=tmp.sum(0)), np.average(np.arange(17), weights=tmp.sum(1))))-8
+            # log1.append(bbb)
+            
         
             # Calculate loss and accuracy
             if num_future>0: 
@@ -207,6 +228,9 @@ class PRIMME(nn.Module):
         # Concatenate batches to form next image (as predicted)
         im_next = torch.cat(im_next_log).reshape(im.shape)
         
+        # self.log0.append(np.stack(log0).mean(0)) #center of mass of whole step
+        # self.log1.append(np.stack(log1).mean(0)) #center of mass of whole step
+        
         # Find average of loss and accuracy
         if num_future>0 and num_features>0: 
             action_likelyhood /= num_features
@@ -216,6 +240,228 @@ class PRIMME(nn.Module):
             return im_next, loss, accuracy, action_likelyhood, action_likelyhood_true
             
         return im_next
+
+    # def step(self, im_seq, miso_matrix=None, unfold_mem_lim=4e9):
+    #     #"im_seq" can be of shape=[1,1,dim0,dim1,dim2] or a sequence of shape=[num_future, 1, dim0, dim1, dim2]
+    #     #Find the image after "im" given the trained model
+    #     #Also calculates loss and accurate if given an image sequence
+    #     #Calculates misorientation features of "miso_matrix" is given
+        
+    #     #Calculate batch size to maintain memory usage limit 
+    #     num_future = im_seq.shape[0] #number of future steps
+    #     batch_sz = int(unfold_mem_lim/((num_future)*self.act_dim**self.num_dims*self.energy_dim**self.num_dims*64)) #set to highest memory functions - "compute_energy_labels_gen"
+    #     num_iter = int(np.ceil(np.prod(im_seq.shape[1:])/batch_sz))
+        
+    #     # Initialize variables and generators
+    #     im = im_seq[0:1,]
+    #     num_future = im_seq.shape[0]-1
+    #     if num_future>0: 
+    #         labels_gen = fs.compute_labels_gen(im_seq, batch_sz, self.act_dim, self.energy_dim, self.reg, self.pad_mode)
+    #         im_next_true_split = im_seq[1:2,].flatten().split(batch_sz)
+        
+    #     im_unfold_gen = fs.unfold_in_batches(im[0,0], batch_sz, [self.obs_dim,]*self.num_dims, [1,]*self.num_dims, self.pad_mode)
+    #     if miso_matrix is None:
+    #         features_gen = fs.compute_features_gen(im, batch_sz, self.obs_dim, self.pad_mode)
+    #     else: 
+    #         features_gen = fs.compute_features_miso_gen(im, batch_sz, miso_matrix, self.obs_dim, self.pad_mode)
+        
+    #     # Find next image
+    #     action_likelyhood = torch.zeros((self.act_dim,)*self.num_dims)
+    #     action_likelyhood_true = torch.zeros((self.act_dim,)*self.num_dims)
+    #     loss = 0
+    #     accuracy = 0
+    #     num_features = 0
+    #     im_next_log = []
+        
+    #     log0 = []
+    #     log1 = []
+        
+    #     for i in range(num_iter):
+            
+    #         # Only use neighborhoods that have more than one ID (have a potential to change ID)
+    #         im_unfold = next(im_unfold_gen).reshape(-1, self.obs_dim**self.num_dims)
+            
+    #         mid_i = int(self.obs_dim**self.num_dims/2)
+    #         current_ids = im_unfold[:,mid_i]
+    #         use_i = (im_unfold != current_ids[:,None]).sum(1).nonzero()[:,0]
+            
+    #         if len(use_i)==1: #There needs to be more than 1 so things will run
+    #             add_i = (use_i+1)%im_unfold.shape[0] #keep the next index whether or not it has all the same IDs
+    #             use_i = torch.cat([use_i, add_i]) #at least two samples needed for batch normalization when training
+            
+            
+    #         # #Decide a random 90 degree rotation for each features/label
+    #         # num_rots = (torch.rand(len(use_i))*4).int() #how many 90 degree rotations to make
+    #         # im_unfold_rot = fs.rot_ims_90(im_unfold[use_i].reshape(-1, *[self.obs_dim,]*self.num_dims), num_rots).reshape(-1, self.obs_dim**self.num_dims)
+            
+            
+            
+    #         # Pass features through model
+    #         features = next(features_gen).reshape(-1, self.obs_dim**self.num_dims)
+    #         outputs = self.forward(features[use_i,])
+    #         switch_i = outputs.argmax(1)
+            
+            
+            
+            
+    #         # features = next(features_gen)[use_i,]
+    #         # features_rot = fs.rot_ims_90(features, num_rots).reshape(-1, self.obs_dim**self.num_dims)
+    #         # outputs_rot = self.forward(features_rot)#.reshape(-1,17,17)
+    #         # outputs = fs.rot_ims_90(outputs_rot.reshape(-1, *[self.obs_dim,]*self.num_dims), -num_rots).reshape(-1, self.obs_dim**self.num_dims)
+            
+    #         # features = next(features_gen)[use_i,].reshape(-1, self.obs_dim**self.num_dims)
+    #         # outputs = self.forward(features)
+    #         # # outputs_rot = fs.rot_ims_90(outputs.reshape(-1, *[self.obs_dim,]*self.num_dims), num_rots).reshape(-1, self.obs_dim**self.num_dims)
+            
+    #         # # switch_i = outputs_rot.argmax(1)
+    #         # switch_i = outputs.argmax(1)
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+    #         # tmp = outputs+0.0001
+    #         # tmp = (tmp/tmp.sum(1)[:,None]).cumsum(1)
+    #         # iii = torch.rand(outputs.shape[0])[:,None].to(tmp.device)
+    #         # switch_i = torch.argmax(((iii<tmp).int()), dim=1)
+            
+    #         action_likelyhood += outputs.sum(0).detach().cpu().reshape((self.act_dim,)*self.num_dims)
+            
+    #         # Find predicted IDs
+    #         next_ids = current_ids.clone()
+    #         # next_ids[use_i] = im_unfold_rot[torch.arange(len(use_i)),switch_i]
+    #         next_ids[use_i] = im_unfold[torch.arange(len(use_i)),switch_i]
+    #         im_next_log.append(next_ids)
+            
+            
+            
+            
+            
+            
+            
+            
+    #         #what is the mean of the outputs
+    #         # ooo = outputs_rot
+    #         ooo = outputs
+            
+    #         tmp = ooo.mean(0).reshape(17,17).detach().cpu()
+    #         aaa = np.stack((np.average(np.arange(17), weights=tmp.sum(0)), np.average(np.arange(17), weights=tmp.sum(1))))-8
+    #         log0.append(aaa)
+            
+    #         m = ooo.max(1)[0]
+    #         tmp = (m[:,None]==ooo).sum(0).reshape(17,17).cpu()
+    #         bbb = np.stack((np.average(np.arange(17), weights=tmp.sum(0)), np.average(np.arange(17), weights=tmp.sum(1))))-8
+    #         log1.append(bbb)
+            
+            
+            
+            
+        
+    #         # Calculate loss and accuracy
+    #         if num_future>0: 
+    #             labels = next(labels_gen).reshape(-1, self.act_dim**self.num_dims)
+    #             if len(use_i>0):
+    #                 action_likelyhood_true += labels[use_i,].sum(0).detach().cpu().reshape((self.act_dim,)*self.num_dims)
+                    
+                    
+    #                 # #what is the mean of the outputs
+    #                 # tmp = action_likelyhood_true
+    #                 # aaa = np.stack((np.average(np.arange(17), weights=tmp.sum(0)), np.average(np.arange(17), weights=tmp.sum(1))))-8
+    #                 # log0.append(aaa)
+                    
+    #                 # tmp = outputs.mean(0).reshape(17,17).detach().cpu()
+    #                 # bbb = np.stack((np.average(np.arange(17), weights=tmp.sum(0)), np.average(np.arange(17), weights=tmp.sum(1))))-8
+    #                 # log1.append(bbb)
+                    
+                    
+                    
+    #                 l = labels[use_i,]
+    #                 o = outputs
+                    
+                    
+    #                 # STANDARDIZE
+    #                 om = o.mean(1)[:,None]
+    #                 os = o.std(1)[:,None]
+    #                 oo = (o-om)/os
+    #                 lm = l.mean(1)[:,None]
+    #                 ls = l.std(1)[:,None]
+    #                 ll = (l-lm)/ls
+                    
+    #                 #ZERO MEAN
+    #                 # om = o.mean(1)[:,None]
+    #                 # oo = o-om
+    #                 # lm = l.mean(1)[:,None]
+    #                 # ll = l-lm
+                    
+    #                 #STANDARDIZE
+    #                 # om = o.mean(1)[:,None]
+    #                 # os = o.std(1)[:,None]
+    #                 # oo = (o-om)/os
+    #                 # lm = l.mean(1)[:,None]
+    #                 # ls = l.std(1)[:,None]
+    #                 # ll = (l-lm)/ls
+                    
+                    
+                    
+    #                 # plt.imshow(oo.mean(0).reshape(17,17).detach().cpu())
+    #                 # plt.imshow(ll.mean(0).reshape(17,17).detach().cpu())
+    #                 # plt.figure()
+    #                 # plt.imshow(((ll-oo)**2).mean(0).reshape(17,17).detach().cpu())
+    #                 # plt.show()
+                    
+                    
+    #                 loss += self.loss_func(oo, ll)*len(use_i) #convert MSE loss back to sum to find average of total
+                   
+    #                 # loss += self.loss_func(outputs, labels[use_i,])*len(use_i) #convert MSE loss back to sum to find average of total
+    #                 next_ids_true = im_next_true_split[i]
+    #                 accuracy += torch.sum(next_ids[use_i] == next_ids_true[use_i]).float() #sum number of correct ID predictions
+    #                 num_features += len(use_i) #track total number of features for averaging later
+                    
+    #     # Concatenate batches to form next image (as predicted)
+    #     im_next = torch.cat(im_next_log).reshape(im.shape)
+        
+        
+        
+        
+        
+    #     self.log0.append(np.stack(log0).mean(0)) #center of mass of whole step
+    #     self.log1.append(np.stack(log1).mean(0)) #center of mass of whole step
+        
+        
+        
+    #     # tmp0 = np.stack(self.log0).T
+    #     # tmp1 = np.stack(self.log1).T
+        
+    #     # plt.figure()
+    #     # plt.plot(tmp0[0], 'C0-') 
+    #     # plt.plot(tmp0[1], 'C0--') 
+    #     # plt.plot(tmp1[0], 'C1-') 
+    #     # plt.plot(tmp1[1], 'C1--')  
+    #     # plt.legend(['Mean Distribution (x)','Mean Distribution (y)','Mean Index (x)','Mean Index (y)'])
+    #     # plt.xlabel('Number of Frames')
+    #     # plt.ylabel('Num pixels from (0,0)')
+    #     # plt.show()
+        
+        
+        
+        
+        
+        
+        
+    #     # Find average of loss and accuracy
+    #     if num_future>0 and num_features>0: 
+    #         action_likelyhood /= num_features
+    #         action_likelyhood_true /= num_features
+    #         loss /= num_features 
+    #         accuracy /= num_features
+    #         return im_next, loss, accuracy, action_likelyhood, action_likelyhood_true
+            
+    #     return im_next
         
         
     def evaluate_model(self):
@@ -250,13 +496,13 @@ class PRIMME(nn.Module):
         s1 = (1,0,slice(None),slice(None)) + s_3d
         
         fig, axs = plt.subplots(1,3)
-        axs[0].matshow(self.im_seq_val[s0].cpu())
+        axs[0].matshow(self.im_seq_val[s0].cpu(), interpolation='none')
         axs[0].set_title('Current')
         axs[0].axis('off')
-        axs[1].matshow(self.im_next_val[s0].cpu()) 
+        axs[1].matshow(self.im_next_val[s0].cpu(), interpolation='none') 
         axs[1].set_title('Predicted Next')
         axs[1].axis('off')
-        axs[2].matshow(self.im_seq_val[s1].cpu()) 
+        axs[2].matshow(self.im_seq_val[s1].cpu(), interpolation='none') 
         axs[2].set_title('True Next')
         axs[2].axis('off')
         plt.savefig('%s/sim_vs_true.png'%fp_results)
@@ -276,14 +522,14 @@ class PRIMME(nn.Module):
         
         ctr = int((self.act_dim-1)/2)
         fig, axs = plt.subplots(1,2)
-        # p1 = axs[0].matshow(self.action_likelyhood_val[s].cpu(), vmin=0, vmax=1)
-        p1 = axs[0].matshow(bbb, vmin=-3, vmax=3)
+        # p1 = axs[0].matshow(self.action_likelyhood_val[s].cpu(), vmin=0, vmax=1, interpolation='none')
+        p1 = axs[0].matshow(bbb, vmin=-3, vmax=3, interpolation='none')
         fig.colorbar(p1, ax=axs[0])
         axs[0].plot(ctr,ctr,marker='x')
         axs[0].set_title('Predicted')
         axs[0].axis('off')
-        # p2 = axs[1].matshow(self.action_likelyhood_true_val[s].cpu(), vmin=0, vmax=1) 
-        p2 = axs[1].matshow(bbb1, vmin=-3, vmax=3) 
+        # p2 = axs[1].matshow(self.action_likelyhood_true_val[s].cpu(), vmin=0, vmax=1, interpolation='none') 
+        p2 = axs[1].matshow(bbb1, vmin=-3, vmax=3, interpolation='none') 
         fig.colorbar(p2, ax=axs[1])
         axs[1].plot(ctr,ctr,marker='x')
         axs[1].set_title('True')
@@ -334,6 +580,23 @@ def train_primme(trainset, num_eps, obs_dim=17, act_dim=17, lr=5e-5, reg=1, pad_
         if plot_freq is not None: 
             if i%plot_freq==0:
                 agent.plot()
+                
+                
+                tmp0 = np.stack(agent.log0).T
+                tmp1 = np.stack(agent.log1).T
+                
+                # print(np.mean(tmp0))
+                # print(np.mean(tmp1))
+                
+                plt.figure()
+                plt.plot(tmp0[0], 'C0-') 
+                plt.plot(tmp0[1], 'C0--') 
+                plt.plot(tmp1[0], 'C1-') 
+                plt.plot(tmp1[1], 'C1--')  
+                plt.legend(['Mean Distribution (x)','Mean Distribution (y)','Mean Index (x)','Mean Index (y)'])
+                plt.xlabel('Number of Frames')
+                plt.ylabel('Num pixels from (0,0)')
+                plt.show()
     
     return modelname
 
@@ -355,7 +618,6 @@ def run_primme(ic, ea, nsteps, modelname, miso_array=None, pad_mode='circular', 
     append_name = modelname.split('_kt')[1]
     sz_str = ''.join(['%dx'%i for i in size])[:-1]
     fp_save = './data/primme_sz(%s)_ng(%d)_nsteps(%d)_freq(1)_kt%s'%(sz_str,ngrain,nsteps,append_name)
-    
     
     # Simulate and store in H5
     with h5py.File(fp_save, 'a') as f:
@@ -389,8 +651,40 @@ def run_primme(ic, ea, nsteps, modelname, miso_array=None, pad_mode='circular', 
             #Plot
             if plot_freq is not None: 
                 if i%plot_freq==0:
+                    plt.figure()
                     s = (0,0,slice(None), slice(None),) + (int(im.shape[-1]/2),)*(d-2)
-                    plt.imshow(im[s].cpu()); plt.show()
+                    plt.imshow(im[s].cpu(), interpolation=None) 
+                    plt.show()
+                    
+                    
+                    
+                    # tmp0 = np.stack(agent.log0).T
+                    # tmp1 = np.stack(agent.log1).T
+                    
+                    # plt.figure()
+                    # plt.plot(tmp0[0], 'C0-') 
+                    # plt.plot(tmp0[1], 'C0--') 
+                    # plt.plot(tmp1[0], 'C1-') 
+                    # plt.plot(tmp1[1], 'C1--')  
+                    # plt.legend(['Mean Distribution (x)','Mean Distribution (y)','Mean Index (x)','Mean Index (y)'])
+                    # plt.xlabel('Number of Frames')
+                    # plt.ylabel('Num pixels from (0,0)')
+                    # plt.show()
+                    
+                    
+                    # plt.figure()
+                    # tmp0 = np.stack(log0).T
+                    # tmp1 = np.stack(log1).T
+                    # plt.plot(tmp0[0], tmp0[1], ',') 
+                    # plt.plot(tmp1[0], tmp1[1], ',') 
+                    
+                    # m = np.max([np.max(np.abs(tmp0)), np.max(np.abs(tmp1))])
+                    
+                    # plt.axis('square')
+                    # plt.xlim([-m,m])
+                    # plt.ylim([-m,m])
+                    # plt.legend(['CoM of mean distribution','Mean chosen index'])
+                    # plt.show()
                         
     return fp_save
     

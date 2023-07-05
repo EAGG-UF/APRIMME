@@ -185,19 +185,43 @@ def unfold_in_batches(im, batch_sz, kernel_sz, stride, pad_mode='circular', if_s
     #Yield 'batch_sz' (int) portions of the view at a time
     #Shuffles output if 'if_shuffle', then yields each kernal once each
     
+    #Pad image
+    d = im.dim()
+    if type(pad_mode) is not list: pad_mode = [pad_mode,]*d
+    
     im_padded = im.clone()
     for i in range(len(kernel_sz)):
         p = int(kernel_sz[i]/stride[i]/2)
-        im_padded = periodic_pad_1d(im_padded, i, p)
+        s = im_padded.shape[i]
+        i0 = np.arange(-p,0)
+        i1 = np.arange(s,s+p)
         
+        if pad_mode[i]=='circular':
+            i0 = i0%s
+            i1 = i1%s
+        elif pad_mode[i]=='clip':
+            i0 = np.clip(i0, 0, s-1)
+            i1 = np.clip(i1, 0, s-1)
+        
+        iii = [slice(None),]*d
+        iii[i] = i0
+        p0 = im_padded[iii]
+        iii[i] = i1
+        p1 = im_padded[iii]
+        
+        im_padded = torch.cat([p0,im_padded,p1], dim=i)
+    im_padded = im_padded.clone()
     
-    # # Delete later, doesn't work for 3D #!!!
-    # #Pad the image
+    # # Delete later, doesn't reflect pad #!!!
+    # im_padded = im.clone()
+    # for i in range(len(kernel_sz)):
+    #     p = int(kernel_sz[i]/stride[i]/2)
+    #     im_padded = periodic_pad_1d(im_padded, i, p)
+
     # tmp = torch.Tensor(kernel_sz)/torch.Tensor(stride)/2
     # pad = tuple(np.flip(tmp.repeat_interleave(2).int().numpy())) #calculate padding needed based on kernel_size
     # if pad_mode!=None: im_padded = pad_mixed(im[None,None], pad, pad_mode)[0,0,] #pad "ims" to maintain dimensions after unfolding
     
-
     #Variables
     dm = im_padded.dim()
     sz = tuple(im_padded.size())
@@ -216,6 +240,24 @@ def unfold_in_batches(im, batch_sz, kernel_sz, stride, pad_mode='circular', if_s
     for j in i_split:
         indices = shape_indices(j, sz_new)
         yield im_unfolded[indices].float()
+        
+        
+def rot_ims_90(ims, num_rots):
+    #Rotations a group of images for a multiple of 90 degrees
+    #ims - shape=(num images, dim0, dim1)
+    #num_rots - int, 0-3 for clockwise, -3-0 for counterclockwise
+    
+    ims = ims.clone()
+    
+    for i in range(3,0,-1):
+        j = i<=num_rots
+        ims[j] = ims[j].permute(0,2,1).flip(2)
+    
+    for i in range(3,0,-1):
+        j = i<=(-num_rots)
+        ims[j] = ims[j].permute(0,2,1).flip(1)
+    
+    return ims
 
 
 
@@ -1500,7 +1542,7 @@ def mean_wo_zeros(a):
     return torch.sum(a)/torch.sum(a!=0)
 
 
-def iterate_function(array, func, n=None, args=[], device=device):
+def iterate_function(array, func, args=[], n=None, device=device):
     
     #Iterate through the first dimension in "array" and apply "func" using "args"
     if n is None: ii = np.arange(len(array))
@@ -1542,6 +1584,7 @@ def compute_grain_stats(hps, gps='last', n=None, device=device):
     for i in range(len(hps)):
         hp = hps[i]
         gp = gps[i]
+        # cut = int(hp.split('_cut(')[1][:-4])
         print('Calculating statistics for: %s/%s'%(hp,gp))
             
         with h5py.File(hp, 'a') as f:
@@ -1573,7 +1616,7 @@ def compute_grain_stats(hps, gps='last', n=None, device=device):
             if 'grain_sides' not in g.keys():
                 args = [max_id]
                 func = find_grain_num_neighbors
-                grain_sides = iterate_function(d, func, n, args)
+                grain_sides = iterate_function(d, func, args, n)
                 g['grain_sides'] = grain_sides
                 print('Calculated: grain_sides')
             else: grain_sides = None
@@ -1582,7 +1625,7 @@ def compute_grain_stats(hps, gps='last', n=None, device=device):
             if 'grain_sides_avg' not in g.keys():
                 if np.all(grain_sides==None): grain_sides = g['grain_sides']
                 func = mean_wo_zeros
-                grain_sides_avg = iterate_function(grain_sides, func, n=n, args=[])
+                grain_sides_avg = iterate_function(grain_sides, func, args=[], n=n)
                 g['grain_sides_avg'] = grain_sides_avg
                 print('Calculated: grain_sides_avg')
             
@@ -1590,7 +1633,7 @@ def compute_grain_stats(hps, gps='last', n=None, device=device):
             if 'ims_miso' not in g.keys():
                 args = [miso_matrix[None,]]
                 func = neighborhood_miso
-                ims_miso = iterate_function(d, func, n, args)[:,0]
+                ims_miso = iterate_function(d, func, args, n)[:,0]
                 g['ims_miso'] = ims_miso
                 print('Calculated: ims_miso')
             else: ims_miso = None
@@ -1599,26 +1642,26 @@ def compute_grain_stats(hps, gps='last', n=None, device=device):
             if 'ims_miso_avg' not in g.keys():
                 if np.all(ims_miso==None): ims_miso = g['ims_miso']
                 func = mean_wo_zeros
-                ims_miso_avg = iterate_function(ims_miso, func, n=n, args=[])
+                ims_miso_avg = iterate_function(ims_miso, func, args=[], n=n)
                 g['ims_miso_avg'] = ims_miso_avg
                 print('Calculated: ims_miso_avg')
             
-            # Find misorientation images using the SPPARKS method
-            if 'ims_miso_spparks' not in g.keys():
-                args = [miso_matrix[None,]]
-                func = neighborhood_miso_spparks
-                ims_miso_spparks = iterate_function(d, func, n, args)[:,0]
-                g['ims_miso_spparks'] = ims_miso_spparks
-                print('Calculated: ims_miso_spparks')
-            else: ims_miso_spparks = None
+            # # Find misorientation images using the SPPARKS method
+            # if 'ims_miso_spparks' not in g.keys():
+            #     args = [miso_matrix[None,], cut]
+            #     func = neighborhood_miso_spparks
+            #     ims_miso_spparks = iterate_function(d, func, args, n)[:,0]
+            #     g['ims_miso_spparks'] = ims_miso_spparks
+            #     print('Calculated: ims_miso_spparks')
+            # else: ims_miso_spparks = None
                 
-            # Find average misorientation per boundary pixel using the SPPARKS method
-            if 'ims_miso_spparks_avg' not in g.keys():
-                if np.all(ims_miso_spparks==None): ims_miso_spparks = g['ims_miso_spparks']
-                func = mean_wo_zeros
-                ims_miso_spparks_avg = iterate_function(ims_miso_spparks, func, n=n, args=[])
-                g['ims_miso_spparks_avg'] = ims_miso_spparks_avg
-                print('Calculated: ims_miso_spparks_avg')
+            # # Find average misorientation per boundary pixel using the SPPARKS method
+            # if 'ims_miso_spparks_avg' not in g.keys():
+            #     if np.all(ims_miso_spparks==None): ims_miso_spparks = g['ims_miso_spparks']
+            #     func = mean_wo_zeros
+            #     ims_miso_spparks_avg = iterate_function(ims_miso_spparks, func, args=[], n=n)
+            #     g['ims_miso_spparks_avg'] = ims_miso_spparks_avg
+            #     print('Calculated: ims_miso_spparks_avg')
                 
             # Find dihedral angle standard deviation
             if 'dihedral_std' not in g.keys():
@@ -1672,8 +1715,8 @@ def make_videos(hps, gps='last'):
         if type(gps)!=list: gps = [gps]
     
     # Make sure all needed datasets exist
-    dts=['ims_id', 'ims_miso', 'ims_miso_spparks']
-    check_exist_h5(hps, gps, dts)  
+    # dts=['ims_id', 'ims_miso', 'ims_miso_spparks']
+    # check_exist_h5(hps, gps, dts)  
     
     for i in tqdm(range(len(hps)), "Making videos"):
         with h5py.File(hps[i], 'a') as f:
@@ -1692,15 +1735,15 @@ def make_videos(hps, gps='last'):
             imageio.mimsave('./plots/ims_id%d.mp4'%(i), ims)
             imageio.mimsave('./plots/ims_id%d.gif'%(i), ims)
             
-            ims = g['ims_miso'][:,0,j]
-            ims = (255/np.max(ims)*ims).astype(np.uint8)
-            imageio.mimsave('./plots/ims_miso%d.mp4'%(i), ims)
-            imageio.mimsave('./plots/ims_miso%d.gif'%(i), ims)
+            # ims = g['ims_miso'][:,0,j]
+            # ims = (255/np.max(ims)*ims).astype(np.uint8)
+            # imageio.mimsave('./plots/ims_miso%d.mp4'%(i), ims)
+            # imageio.mimsave('./plots/ims_miso%d.gif'%(i), ims)
             
-            ims = g['ims_miso_spparks'][:,0,j]
-            ims = (255/np.max(ims)*ims).astype(np.uint8)
-            imageio.mimsave('./plots/ims_miso_spparks%d.mp4'%(i), ims)
-            imageio.mimsave('./plots/ims_miso_spparks%d.gif'%(i), ims)
+            # ims = g['ims_miso_spparks'][:,0,j]
+            # ims = (255/np.max(ims)*ims).astype(np.uint8)
+            # imageio.mimsave('./plots/ims_miso_spparks%d.mp4'%(i), ims)
+            # imageio.mimsave('./plots/ims_miso_spparks%d.gif'%(i), ims)
 
         
 def make_time_plots(hps, gps='last', scale_ngrains_ratio=0.05, cr=None, legend=True, if_show=True):
@@ -2245,7 +2288,10 @@ def find_juntion_neighbors(ncombo_avg):
     for i in ids.T:
         single = (ids.flatten()[None,]==i[:,None]).sum(0).reshape(3,-1).sum(0)
         log.append(single)
-    adjacent = torch.stack(log)==2
+    if len(log)>0:
+        adjacent = torch.stack(log)==2
+    else:
+        adjacent = None
     
     # ids = ncombo_avg[:3,:1000].flatten()[None,]
     # adj_tmp = ids==ids.T #compare all ID values
@@ -2293,6 +2339,8 @@ def find_dihedral_angles(im, if_plot=False, num_plot_jct=10):
     ncombo = find_ncombo(im, n=3) #find all indices included in a triplet
     ncombo_avg = find_ncombo_avg(ncombo, im.shape[2:]) #find the average location of those found in the same triplet
     adj = find_juntion_neighbors(ncombo_avg)  #find the neighbors for each triplet (share two of the same IDs)
+    if adj==None: 
+        return None
     
     # Keep only triplets with 3 neighbors (true triplets)
     i = torch.sum(adj, dim=0)==3 
@@ -2301,158 +2349,132 @@ def find_dihedral_angles(im, if_plot=False, num_plot_jct=10):
     
     # Find junction pairs (first junction always has 3 neighbors and will be present in the first position exactly three times, the second might not)
     i, j = torch.where(adj1) 
-    jpairs = torch.stack([ncombo_avg1[:,i], ncombo_avg[:,j]])
+    jpairs_all = torch.stack([ncombo_avg1[:,i], ncombo_avg[:,j]]).reshape(2,5,-1,3)
     
-    # Find junction pair common IDs (find the two of the three IDs that match)
-    tmp = (jpairs[0,:3][None]==jpairs[1,:3][:,None]).sum(0) 
-    i, j = torch.where(tmp)
-    ii = torch.argsort(j)
-    i, j = [i[ii], j[ii]]
-    jpair_ids = jpairs[0,i,j].reshape(-1,2).T
-    jpair_ids = torch.sort(jpair_ids, dim=0)[0] #always have ascending ids
+    # Find edge indicies
+    ncombo = find_ncombo(im, n=2) 
     
-    # Find the edge indices that belong to each junction pair
-    ncombo = find_ncombo(im, n=2) #find edge indicies
+    # Batch the number of triple junctions processed at once 
+    batch_sz = int(unfold_mem_lim/(ncombo.shape[1]*3*64))
+    jpairs_split = jpairs_all.split(batch_sz, dim=2)
     
-    log = []
-    for i in range(jpair_ids.shape[1]):
-        jpair_id = jpair_ids[:,i][:,None]
-        jpair_edge = torch.all(jpair_id==ncombo[:-2], dim=0)
-        log.append(jpair_edge)
-    if len(log)==0: 
-        return None
-    else:
-        jpair_edges = torch.stack(log)
-    # jpair_edges = torch.all(jpair_ids[:,:100].T[:,:,None]==ncombo[:-2][None,], dim=1) #These don't neccesarily include the junctions yet, because junctions are an average of triplets that don't include just these two ids
+    log_da = []
+    for jpairs_tmp in jpairs_split:
+        jpairs = jpairs_tmp.reshape(2,5,-1)
     
-    #Remove all of the jpairs that have any edge that has a length of four or less
-    edges_len = my_batch(jpair_edges, torch.sum, 100)
-    i = (edges_len>4).reshape(-1,3).all(1)
-    j = i[:,None].repeat(1,3).flatten()
-    jpairs = jpairs[:,:,j]
-    jpair_edges = jpair_edges[j,]
-    edges_len = edges_len[j]
-    
-    if len(jpair_edges)==0: return None
-    
-    # Create a padded matrix to hold edge indices
-    i, j = batch_where(jpair_edges, 100)
-    edges_all = ncombo[-2:,j].T
-    edges_split = torch.split(edges_all, list(edges_len))
-    edges_padded = torch.nn.utils.rnn.pad_sequence(edges_split, padding_value=0)
-    
-    # Append start and end junction locations (ensure these locations are also sampled from in the next step)
-    tmp0 = jpairs[0:1,-2:,:].permute(0,2,1) #start junction location
-    tmp1 = jpairs[1:,-2:,:].permute(0,2,1) #end junction location
-    edges_tmp = torch.cat([tmp0, tmp1, edges_padded])
-    
-    # Oversample non-zero values to fill in the padded zero regions
-    i = ((edges_len[None,]+2)*torch.rand(edges_tmp.shape[:2]).to(im.device)).long()
-    edges = edges_tmp[i, torch.arange(edges_tmp.shape[1]).long(), :]
-    
-    # Append the start junction location (ensure this is the location that is set to [0,0] for the line fit)
-    tmp0 = jpairs[0:1,-2:,:].permute(0,2,1) #start junction location
-    edges = torch.cat([tmp0, edges])
-    
-    # Unwrap edge indices that jump from one boundary to the other
-    h = edges.max(0)[0].max(0)[0][None,None]
-    j = jpairs[0,-2:,].T[None,]
-    tmp = edges-j
-    edges = edges - h*torch.sign(tmp)*(torch.abs(tmp)>(h/2))
-    
-    # Fit lines to all of these sets (do it twice - fit x to y and y to x to avoid infinite slopes)
-    points = edges
-    points = points - points[0,:,:]
-    x = points[...,0].T
-    y = points[...,1].T
-    A = torch.stack([x, x**2]).permute(1,2,0)
-    B = y[...,None]
-    log_sx = []
-    log_rx0 = []
-    for i in range(A.shape[0]):
-        sx, rx0, _, _ = torch.linalg.lstsq(A[i], B[i])
-        log_sx.append(sx)
-        log_rx0.append(rx0)
-    sx = torch.stack(log_sx)
-    rx0 = torch.stack(log_rx0)
-    # sx, rx0, _, _ = torch.linalg.lstsq(A, B)
-    rx = ((torch.matmul(A,sx)-B)[...,0]**2).sum(1)[:,None]
-    
-    A = torch.stack([y, y**2]).permute(1,2,0)
-    B = x[...,None]
-    log_sy = []
-    log_ry0 = []
-    for i in range(A.shape[0]):
-        sy, ry0, _, _ = torch.linalg.lstsq(A[i], B[i])
-        log_sy.append(sy)
-        log_ry0.append(ry0)
-    sy = torch.stack(log_sy)
-    ry0 = torch.stack(log_ry0)
-    # sy, ry0, _, _ = torch.linalg.lstsq(A, B)
-    ry = ((torch.matmul(A,sy)-B)[...,0]**2).sum(1)[:,None]
-    
-    # Find junction angles and then dihedral angles
-    i = (ry<rx)[:,0] #Keep x fit when its "r" value is lower
-    
-    ang_x = torch.atan(sx[:,0])/np.pi*180%360
-    ang_x[x.sum(1)<0] = (ang_x[x.sum(1)<0] + 180)%360 
-    ang_x = (360-ang_x+90)%360 #to match the axis and rotation direction for the angles calculated below
-    
-    ang_y = torch.atan(sy[:,0])/np.pi*180%360
-    ang_y[y.sum(1)<0] = (ang_y[y.sum(1)<0] + 180)%360 
-    
-    ang = ang_x.clone(); ang[i] = ang_y[i]
-    
-    junction_angles = ang.reshape(-1,3).T
-    dihedral_angles = calc_dihedral_angles(junction_angles)
-    
-    junction_ids = jpairs[0,:3].reshape(3,-1,3)[:,:,0]
-    
-    
-    
-    # iii = 560
-    
-    # sx[iii]
-    # rx[iii]
-    # sy[iii]
-    # ry[iii]
-    
-    # sy, ry0, _, _ = torch.linalg.lstsq(A[iii], B[iii]+0.5)
-    
-    # y_new = torch.linspace(-12,0,100).to(device)
-    # x_fit = sy[0]*y_new + sy[1]*y_new**2 + sy[2]*y_new**3
-    # plt.plot(y_new.cpu(), x_fit.cpu())
-    
-    # plt.plot(A[iii,:,0].cpu(), B[iii,:,0].cpu()+0.5,'.')
-    
-    
-    # dihedral_angles[:,186]
-    # iii = 275*3
-    # aaa = points[:,iii+1].cpu()
-    # bbb = points[:,iii+2].cpu()
-    
-    # plt.plot(bbb)
-    
-    # plt.plot(aaa[:,0],aaa[:,1],'.')
-    
-    # points[:,iii+1]-points[:,iii+2]
-    
-    
-    # junction_ids[:,275]
-
-    # im.shape
-    # plt.imshow(im[0,0].cpu()==514)  
-    # # plt.imshow(im[0,0].cpu()==3788) 
-    # # plt.imshow(im[0,0].cpu()==3878) 
-    # plt.xlim([100,200])
-    # plt.ylim([900,1000])
-    
-    #between 3788, 514
-    #either 826, 827
-    
-    
-    
-    # Plot junctions with edge indices and fit lines
+        # Find junction pair common IDs (find the two of the three IDs that match)
+        tmp = (jpairs[0,:3][None]==jpairs[1,:3][:,None]).sum(0) 
+        i, j = torch.where(tmp)
+        ii = torch.argsort(j)
+        i, j = [i[ii], j[ii]]
+        jpair_ids = jpairs[0,i,j].reshape(-1,2).T #the grain ids that make it each edge
+        jpair_ids = torch.sort(jpair_ids, dim=0)[0] #always have ascending ids (first ID smaller)
+        
+        # Find the edge indices that belong to each junction pair
+        log = []
+        for i in range(jpair_ids.shape[1]):
+            jpair_id = jpair_ids[:,i][:,None]
+            jpair_edge = torch.all(jpair_id==ncombo[:-2], dim=0)
+            log.append(jpair_edge)
+            
+        if len(log)==0: 
+            # return None
+            continue
+        else:
+            jpair_edges = torch.stack(log)
+        # jpair_edges = torch.all(jpair_ids[:,:100].T[:,:,None]==ncombo[:-2][None,], dim=1) #These don't neccesarily include the junctions yet, because junctions are an average of triplets that don't include just these two ids
+        
+        #Remove all of the jpairs that have any edge that has a length of four or less
+        edges_len = my_batch(jpair_edges, torch.sum, 100)
+        i = (edges_len>4).reshape(-1,3).all(1)
+        j = i[:,None].repeat(1,3).flatten()
+        jpairs = jpairs[:,:,j]
+        jpair_edges = jpair_edges[j,]
+        edges_len = edges_len[j]
+        
+        if len(jpair_edges)==0: continue #return None
+        
+        # Create a padded matrix to hold edge indices
+        i, j = batch_where(jpair_edges, 100)
+        edges_all = ncombo[-2:,j].T
+        edges_split = torch.split(edges_all, list(edges_len))
+        edges_padded = torch.nn.utils.rnn.pad_sequence(edges_split, padding_value=0)
+        
+        # Append start and end junction locations (ensure these locations are also sampled from in the next step)
+        tmp0 = jpairs[0:1,-2:,:].permute(0,2,1) #start junction location
+        tmp1 = jpairs[1:,-2:,:].permute(0,2,1) #end junction location
+        edges_tmp = torch.cat([tmp0, tmp1, edges_padded])
+        
+        # Oversample non-zero values to fill in the padded zero regions
+        i = ((edges_len[None,]+2)*torch.rand(edges_tmp.shape[:2]).to(im.device)).long()
+        edges = edges_tmp[i, torch.arange(edges_tmp.shape[1]).long(), :]
+        
+        # Append the start junction location (ensure this is the location that is set to [0,0] for the line fit)
+        tmp0 = jpairs[0:1,-2:,:].permute(0,2,1) #start junction location
+        edges = torch.cat([tmp0, edges])
+        
+        # Unwrap edge indices that jump from one boundary to the other
+        h = edges.max(0)[0].max(0)[0][None,None]
+        j = jpairs[0,-2:,].T[None,]
+        tmp = edges-j
+        edges = edges - h*torch.sign(tmp)*(torch.abs(tmp)>(h/2))
+        
+        # Fit lines to all of these sets (do it twice - fit x to y and y to x to avoid infinite slopes)
+        points = edges
+        points = points - points[0,:,:]
+        x = points[...,0].T
+        y = points[...,1].T
+        
+        A = torch.stack([x, x**2, x**3]).permute(1,2,0)
+        # A = torch.stack([x, x**2]).permute(1,2,0)
+        # A = torch.stack([x]).permute(1,2,0)
+        B = y[...,None]
+        log_sx = []
+        log_rx0 = []
+        for i in range(A.shape[0]):
+            sx, rx0, _, _ = torch.linalg.lstsq(A[i], B[i])
+            log_sx.append(sx)
+            log_rx0.append(rx0)
+        sx = torch.stack(log_sx)
+        rx0 = torch.stack(log_rx0)
+        # sx, rx0, _, _ = torch.linalg.lstsq(A, B)
+        rx = ((torch.matmul(A,sx)-B)[...,0]**2).sum(1)[:,None]
+        
+        A = torch.stack([y, y**2, y**3]).permute(1,2,0)
+        # A = torch.stack([y, y**2]).permute(1,2,0)
+        # A = torch.stack([y]).permute(1,2,0)
+        B = x[...,None]
+        log_sy = []
+        log_ry0 = []
+        for i in range(A.shape[0]):
+            sy, ry0, _, _ = torch.linalg.lstsq(A[i], B[i])
+            log_sy.append(sy)
+            log_ry0.append(ry0)
+        sy = torch.stack(log_sy)
+        ry0 = torch.stack(log_ry0)
+        # sy, ry0, _, _ = torch.linalg.lstsq(A, B)
+        ry = ((torch.matmul(A,sy)-B)[...,0]**2).sum(1)[:,None]
+        
+        # Find junction angles and then dihedral angles
+        i = (ry<rx)[:,0] #Keep x fit when its "r" value is lower
+        
+        ang_x = torch.atan(sx[:,0])/np.pi*180%360
+        ang_x[x.sum(1)<0] = (ang_x[x.sum(1)<0] + 180)%360 
+        ang_x = (360-ang_x+90)%360 #to match the axis and rotation direction for the angles calculated below
+        
+        ang_y = torch.atan(sy[:,0])/np.pi*180%360
+        ang_y[y.sum(1)<0] = (ang_y[y.sum(1)<0] + 180)%360 
+        
+        ang = ang_x.clone(); ang[i] = ang_y[i]
+        
+        junction_angles = ang.reshape(-1,3).T
+        dihedral_angles = calc_dihedral_angles(junction_angles)
+        
+        junction_ids = jpairs[0,:3].reshape(3,-1,3)[:,:,0]
+        
+        log_da.append(torch.stack([*junction_ids, *dihedral_angles]))
+        
+    # Plot junctions with edge indices and fit lines (only samples from last batch)
     if if_plot:
         
         # Plot the dihedral angle histogram
@@ -2472,15 +2494,17 @@ def find_dihedral_angles(im, if_plot=False, num_plot_jct=10):
             x_tmp = points[...,0]
             x_fit = torch.stack([torch.linspace(torch.min(x_tmp[:,k]), torch.max(x_tmp[:,k]), 100) for k in range(x_tmp.shape[1])]).to(im.device)
             ss = sx[...,0]
-            # y_fit = (ss[:,0:1]*x_fit + ss[:,1:2]*x_fit**2 + ss[:,2:]*x_fit**3 + y_os).T
-            y_fit = (ss[:,0:1]*x_fit + ss[:,1:2]*x_fit**2 + y_os).T
+            y_fit = (ss[:,0:1]*x_fit + ss[:,1:2]*x_fit**2 + ss[:,2:]*x_fit**3 + y_os).T
+            # y_fit = (ss[:,0:1]*x_fit + ss[:,1:2]*x_fit**2 + y_os).T
+            # y_fit = (ss[:,0:1]*x_fit + y_os).T
             x_fit = (x_fit + x_os).T
             
             y_tmp = points[...,1]
             y0 = torch.stack([torch.linspace(torch.min(y_tmp[:,k]), torch.max(y_tmp[:,k]), 100) for k in range(y_tmp.shape[1])]).to(im.device)
             ss = sy[...,0]
-            # x0 = (ss[:,0:1]*y0 + ss[:,1:2]*y0**2 + ss[:,2:]*y0**3 + x_os).T
-            x0 = (ss[:,0:1]*y0 + ss[:,1:2]*y0**2 + x_os).T
+            x0 = (ss[:,0:1]*y0 + ss[:,1:2]*y0**2 + ss[:,2:]*y0**3 + x_os).T
+            # x0 = (ss[:,0:1]*y0 + ss[:,1:2]*y0**2 + x_os).T
+            # x0 = (ss[:,0:1]*y0 + x_os).T
             y0 = (y0 + y_os).T
             
             x_fit[:,i] = x0[:,i]
@@ -2508,7 +2532,7 @@ def find_dihedral_angles(im, if_plot=False, num_plot_jct=10):
                 tmp = input('Plot more junctions (y/n)?')
                 if tmp!='y': if_plot=False
             
-    return torch.stack([*junction_ids, *dihedral_angles])
+    return torch.cat(log_da, dim=1)
 
 
 def find_dihedral_stats(ims, if_plot=False):
@@ -2522,9 +2546,10 @@ def find_dihedral_stats(ims, if_plot=False):
     
     num_ims, _, _, _, dim_size = ims.shape
     
+    log_da0 = []
     log_std = []
     # log_mean_max = []
-    for i in range(num_ims):
+    for i in tqdm(range(num_ims)):
         im = ims[i,0]
         log_da = [torch.ones([6,0]).to(im.device)] #preload so all functions work even when no junctions are found
         for j in range(dim_size):
@@ -2533,6 +2558,7 @@ def find_dihedral_stats(ims, if_plot=False):
             if da is not None: log_da.append(da)
         dihedral_angles = torch.cat(log_da, dim=1)[3:]
         dihedral_angles = dihedral_angles[:,torch.isnan(dihedral_angles).sum(0)==0] #remove rows with nan values
+        log_da0.append(dihedral_angles)
         log_std.append(torch.std(dihedral_angles.flatten()))
         # log_mean_max.append(torch.mean(dihedral_angles.max(0)[0]))
         
@@ -2543,11 +2569,52 @@ def find_dihedral_stats(ims, if_plot=False):
             plt.plot(a)
             plt.show()
     
+    dihedral_angles = log_da0
     da_std = torch.stack(log_std)
     # da_mean_max = torch.stack(log_mean_max)
     
-    return da_std#, da_mean_max
+    return da_std#, dihedral_angles #, da_mean_max
 
+
+def find_dihedral_stats2(ims, if_plot=False):
+    #'ims' - shape=(num_ims, 1, dim0, dim1, dim2)
+    #Works in 2D and 3D
+    #3D images are sliced into 2D and the result are appended together
+    
+    # ims = torch.from_numpy(ims.astype(int))
+    d = ims.dim() - 2 #2D or 3D?
+    if d==2: ims = ims[...,None]
+    
+    num_ims, _, _, _, dim_size = ims.shape
+    
+    log_da0 = []
+    log_std = []
+    # log_mean_max = []
+    for i in tqdm(range(num_ims)):
+        im = ims[i,0]
+        log_da = [torch.ones([6,0]).to(im.device)] #preload so all functions work even when no junctions are found
+        for j in range(dim_size):
+            im_split = im[:,:,j][None,None]
+            da = find_dihedral_angles(im_split)
+            if da is not None: log_da.append(da)
+        dihedral_angles = torch.cat(log_da, dim=1)[3:]
+        dihedral_angles = dihedral_angles[:,torch.isnan(dihedral_angles).sum(0)==0] #remove rows with nan values
+        log_da0.append(dihedral_angles)
+        log_std.append(torch.std(dihedral_angles.flatten()))
+        # log_mean_max.append(torch.mean(dihedral_angles.max(0)[0]))
+        
+        if if_plot:
+            plt.figure()
+            bins = np.linspace(0,360,20)
+            a, b = np.histogram(dihedral_angles, bins)
+            plt.plot(a)
+            plt.show()
+    
+    dihedral_angles = log_da0
+    da_std = torch.stack(log_std)
+    # da_mean_max = torch.stack(log_mean_max)
+    
+    return da_std, dihedral_angles #, da_mean_max
 
 
 

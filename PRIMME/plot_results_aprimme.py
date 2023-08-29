@@ -7,7 +7,7 @@ Created on Tue Jun 13 11:18:08 2023
 """
 
 
-# import PRIMME as fsp
+import PRIMME as fsp
 import functions as fs
 import h5py 
 import numpy as np
@@ -21,11 +21,507 @@ import torch
 # import scipy.io
 # from tqdm import tqdm
 from matplotlib.patches import Rectangle
+from tqdm import tqdm
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
+
+# model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(50)_4.h5 #True miso 
+
+trainset = './data/trainset_spparks_sz(257x257)_ng(256-256)_nsets(200)_future(4)_max(100)_kt(0.66)_cut(0).h5'
+modelname = fsp.train_primme(trainset, num_eps=1000, obs_dim=17, act_dim=17, lr=5e-5, reg=1, if_miso=False, plot_freq=20)
+     
+trainset = './data/trainset_spparks_sz(257x257)_ng(256-256)_nsets(200)_future(4)_max(100)_kt(0.66)_cut(25).h5'
+modelname = fsp.train_primme(trainset, num_eps=1000, obs_dim=17, act_dim=17, lr=5e-5, reg=1, if_miso=True, plot_freq=20)
+
+
+
+
+fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
+with h5py.File(fp, 'r') as f: 
+    ic = f['sim0/ims_id'][0,0].astype(float)
+    ea = f['sim0/euler_angles'][:]
+    ma = f['sim0/miso_array'][:]
+
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(0).h5'
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=True, plot_freq=50)
+fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
+# fs.compute_grain_stats(fp)
+
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(25).h5'
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=True, plot_freq=50)
+fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
+fs.compute_grain_stats(fp)
+
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(50).h5'
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=True, plot_freq=50)
+fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(50).h5'
+fs.compute_grain_stats(fp)
+
+
+
+
+
+#I want to choose the model that has the best statistical performance
+#I am particularly concerned about:
+#   Mean radius square curve - linear even from the beginning
+#   Normalized radius distribution - no dip for small grains
+#   Triple grain dihedral angles that go up with misorientiton - ideally matching theory
+#   Dihedral angles drop slower for anisotropic
+
+#The models I have
+#   Reulstd
+#   Sig
+#   Signoise
+#   Signoisestd
+
+
+
+
+fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(0).h5'
+with h5py.File(fp, 'r') as f:
+    grain_areas = f['sim0/grain_areas'][:]
+ng = (grain_areas!=0).sum(1)
+s0 = 0#np.argmin(np.abs(ng-5000))
+si = np.argmin(np.abs(ng-1500))
+grain_radii = np.sqrt(grain_areas/np.pi)
+grain_radii_avg = grain_radii.sum(1)/ng #find mean without zeros
+r2 = (grain_radii_avg**2)[s0:si] #square after the mean
+p_m = np.polyfit(np.arange(si-s0), r2, deg=1)[0]
+# p_mcp = np.sum(np.linalg.pinv(np.arange(si-s0)[:,None])*(r2-r2[0]))
+t_m = np.arange(si-s0)
+ng_m = ng[s0:si]
+r2_m = r2
+
+
+
+
+fps = [
+       './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0)_relustd.h5',
+       './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(50)_relustd.h5',
+       './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0)_sig.h5',
+       './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(50)_sig.h5',
+       './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0)_signoise.h5',
+       './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(50)_signoise.h5',
+       './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0)_signoisestd.h5',
+       './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(50)_signoisestd.h5'
+       ]
+
+log = []
+
+for i, fp in enumerate(fps):
+    
+    
+    with h5py.File(fp, 'r') as f:
+        print(f.keys())
+        grain_areas = f['sim0/grain_areas'][:]
+    ng = (grain_areas!=0).sum(1)
+    s0 = 0#np.argmin(np.abs(ng-5000))
+    si = np.argmin(np.abs(ng-1500))
+    grain_radii = np.sqrt(grain_areas/np.pi)
+    grain_radii_avg = grain_radii.sum(1)/ng #find mean without zeros
+    r2 = (grain_radii_avg**2)[s0:si] #square after the mean
+    p = np.polyfit(np.arange(si-s0), r2, deg=1)[0]
+    # p = np.sum(np.linalg.pinv(np.arange(si-s0)[:,None])*(r2-r2[0]))
+    scale = p/p_m
+    t = np.arange(si-s0)*scale
+    ng_p = ng[s0:si]
+    r2_p = r2
+    
+    log.append([t, r2])
+    
+    if i%2==0: plt.plot(t, r2*1e-12, 'C%d'%np.floor(i/2))
+    elif i%2==1: plt.plot(t, r2*1e-12, '--C%d'%np.floor(i/2))
+
+plt.legend(['relustd (cut=0)', 'relustd (cut=50)', 
+            'sig (cut=0)', 'sig (cut=50)',
+            'signoise (cut=0)', 'signoise (cut=50)',
+            'signoisestd (cut=0)', 'signoisestd (cut=50)'])
+plt.ylabel('$<R>^2$ ($m^2$)')
+plt.xlabel('Time (unitless')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+trainset = './data/trainset_spparks_sz(257x257)_ng(256-256)_nsets(200)_future(4)_max(100)_kt(0.66)_cut(0).h5'
+modelname = fsp.train_primme(trainset, num_eps=1000, obs_dim=17, act_dim=17, lr=5e-5, reg=1, if_miso=False, plot_freq=20)
+
+
+fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(0).h5'
+with h5py.File(fp, 'r') as f: 
+    ic = f['sim0/ims_id'][0,0].astype(float)
+    ea = f['sim0/euler_angles'][:]
+    ma = f['sim0/miso_array'][:]
+   
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(100)_signoise.h5'
+fp = fsp.run_primme(ic, ea, nsteps=500, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=True, plot_freq=50)
+fs.compute_grain_stats(fp)
+
+
+
+trainset = './data/trainset_spparks_sz(257x257)_ng(256-256)_nsets(200)_future(4)_max(100)_kt(0.66)_cut(100).h5'
+modelname = fsp.train_primme(trainset, num_eps=1000, obs_dim=17, act_dim=17, lr=5e-5, reg=1, if_miso=True, plot_freq=20)
+
+
+fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(0).h5'
+with h5py.File(fp, 'r') as f: 
+    ic = f['sim0/ims_id'][0,0].astype(float)
+    ea = f['sim0/euler_angles'][:]
+    ma = f['sim0/miso_array'][:]
+    
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(100).h5'
+fp = fsp.run_primme(ic, ea, nsteps=500, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=True, plot_freq=50)
+fs.compute_grain_stats(fp)
+
+
+
+
+
+
+
+
+
+
+#FIGURE OUT HOW TO RUN DIHEDRALS TOMORROW
+
+
+
+
+
+
+# modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(50)_4.h5'
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(50)_tmpname.h5'
+
+ic, ea = fs.generate_3grainIC(size=[256,256], h=150)
+
+
+tms = [1/100, 2.09, 5.38, 9.87, 15.98, 24.91, 50, 100, 150, 200] 
+theory = [90.05 , 95, 100, 105, 110, 115, 120, 120, 120]
+
+log2 = []
+
+for tm in tms: 
+    ma = np.array([50, tm ,50])*np.pi/180/2
+    fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='clip', if_miso=True, plot_freq=999)
+    with h5py.File(fp, 'r') as f: 
+        k = len(f.keys())-1
+        ims = f['sim%d/ims_id'%k][:]
+    
+    log = []
+    i = np.linspace(0,len(ims)-1,100).astype(int)
+    for im in tqdm(torch.from_numpy(ims[i]).to(device)): 
+        aaa = fs.find_dihedral_angles(im[None], if_plot=False, num_plot_jct=10, pad_mode='reflect')
+        if aaa is None: th = np.nan
+        else: th = (aaa[-2:,-1]).mean().cpu().numpy()
+        log.append(th)
+    
+    tmp = np.array(log)
+    log2.append(tmp)
+    plt.plot(np.stack(log2).T)
+    plt.legend([str(t) for t in theory[:len(log2)]])
+    plt.title('Three grain predicted and actuall angles')
+    plt.xlabel('Steps/10')
+    plt.ylabel('Angle (degrees)')
+    plt.show()
+    
+    np.save('./data/three_grain_dihedrals_sigmoid50', np.stack(log2).T)
+
+#RECREATE the relu, norm model (without added noise) and see if it gives the same results as before
+
+
+fp = './data/spparks_sz(256x256)_ng(3)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(50).h5'
+with h5py.File(fp, 'r') as f: 
+    k = len(f.keys())
+
+log2 = []
+for i in range(k):
+    with h5py.File(fp, 'r') as f: 
+        ims = f['sim%d/ims_id'%i][:]
+    
+    log = []
+    i = np.linspace(0,len(ims)-1,100).astype(int)
+    for im in tqdm(torch.from_numpy(ims[i]).to(device)): 
+        aaa = fs.find_dihedral_angles(im[None], if_plot=False, num_plot_jct=10, pad_mode='reflect')
+        if aaa is None: th = np.nan
+        else: th = (aaa[-2:,-1]).mean().cpu().numpy()
+        log.append(th)
+    
+    tmp = np.array(log)
+    log2.append(tmp)
+    plt.plot(np.stack(log2).T)
+    plt.legend([str(t) for t in theory[:len(log2)]])
+    plt.title('Three grain predicted and actual angles')
+    plt.xlabel('Steps/10')
+    plt.ylabel('Angle (degrees)')
+    plt.show()
+
+
+
+ims = np.load('./data/spparks_expected.npy')[:,None,:,:]
+
+log = []
+for im in tqdm(torch.from_numpy(ims).to(device)): 
+    aaa = fs.find_dihedral_angles(im[None], if_plot=False, num_plot_jct=10, pad_mode='reflect')
+    if aaa is None: th = np.nan
+    else: th = (aaa[-2:,-1]).mean().cpu().numpy()
+    log.append(th)
+
+tmp = np.array(log)
+plt.plot(tmp)
+plt.legend(['105'])
+plt.title('Three grain predicted and actual angles')
+plt.xlabel('Steps')
+plt.ylabel('Angle (degrees)')
+plt.show()
+
+
+
+
+
+
+
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(200)_3.h5'
+ic, ea = fs.generate_3grainIC(size=[256,256], h=200)
+ic = np.flipud(ic).copy()
+
+ma = np.array([1,1/1000,1])*200/180*np.pi
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='clip', if_miso=True, plot_freq=1)
+with h5py.File(fp, 'r') as f: ims0 = f['sim0/ims_id'][:]
+
+
+
+
+
+### Train PRIMME to not drift
+# Find a training method doesn't drift or have noise
+#1 - normal (isotropic)
+#2 - add noise to output ~ U[0,1e-9] (isotropic)
+#3 - #2 but Trained with spparks cut=200 (anisotropic), cut=50 also (two different ones)
+#4 - #3 but sigmoid on output instead of relu
+
+trainset = './data/trainset_spparks_sz(257x257)_ng(256-256)_nsets(200)_future(4)_max(100)_kt(0.66)_cut(50).h5'
+modelname = fsp.train_primme(trainset, num_eps=1000, obs_dim=17, act_dim=17, lr=5e-5, reg=1, if_miso=True, plot_freq=20)
+    
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(200)_4.h5'
+
+ic, ea = fs.generate_circleIC(size=[258,258], r=100)
+fp = fsp.run_primme(ic, ea, nsteps=500, modelname=modelname, pad_mode='circular', if_miso=False, plot_freq=20)
+
+ic, ea = fs.generate_3grainIC(size=[258,258], h=150)
+fp = fsp.run_primme(ic, ea, nsteps=500, modelname=modelname, pad_mode='clip', if_miso=False, plot_freq=20)
+
+ic, ea, _ = fs.voronoi2image(size=[258,258], ngrain=512)
+fp = fsp.run_primme(ic, ea, nsteps=500, modelname=modelname, pad_mode='circular', if_miso=False, plot_freq=20)
+
+
+fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
+with h5py.File(fp, 'r') as f:
+    ic = f['sim0/ims_id'][0,0].astype(float)
+    ea = f['sim0/euler_angles'][:]
+    ma = f['sim0/miso_array'][:]
+
+
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=False, plot_freq=20)
+fs.compute_grain_stats(fp)
+
+
+fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0)_1.h5'
+
+
+
+
+
+
+fp = './data/spparks_sz(256x256)_ng(3)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(50).h5'
+with h5py.File(fp, 'r') as f: 
+    ims0 = f['sim0/ims_id'][:]
+    ims05 = f['sim1/ims_id'][:]
+    ims1 = f['sim2/ims_id'][:]
+
+
+plt.imshow(ims1[-1,0])
+
+
+
+### Three grain dihedral angle
+
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(50)_4.h5'
+ic, ea = fs.generate_3grainIC(size=[256,256], h=150)
+
+ma = np.array([1,1/1000,1])*50/180*np.pi
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='clip', if_miso=True, plot_freq=50)
+with h5py.File(fp, 'r') as f: print(f.keys()); ims0 = f['sim3/ims_id'][:]
+
+# ma = np.array([1,1/2,1])*50/180*np.pi
+tms = [1/100, 2.09, 5.38, 9.87, 15.98, 24.91, 50, 100, 150] 
+#theory - [90,05 , 95, 100, 105, 110, 115, 120, 120, 120]
+#experiment - [90.2, 90.6, 90.9, 91, 91, 111.9]
+ma = np.array([50, 50 ,50])*np.pi/180
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='clip', if_miso=True, plot_freq=50)
+with h5py.File(fp, 'r') as f: print(f.keys()); ims05 = f['sim16/ims_id'][:]
+
+ma = np.array([1,1,1])*50/180*np.pi
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, pad_mode='clip', if_miso=True, plot_freq=50)
+with h5py.File(fp, 'r') as f: ims1 = f['sim5/ims_id'][:]
+
+
+#Show last image and find dihedral angles 
+ims = ims05
+plt.imshow(ims[-1,0]); plt.show()
+log = []
+i = np.linspace(0,len(ims)-1,100).astype(int)
+for im in tqdm(torch.from_numpy(ims[i]).to(device)): 
+    aaa = fs.find_dihedral_angles(im[None], if_plot=False, num_plot_jct=10, pad_mode='reflect')
+    th = (aaa[-2:,-1]).mean()
+    log.append(th)
+plt.plot(torch.stack(log).cpu())
+plt.show()
+
+
+aaa = torch.stack(log).cpu()
+plt.plot(aaa[aaa<140])
+torch.mean(aaa[aaa<140])
+
+#Plot
+alphas = ['1',r'$\dfrac{1}{2}$',r'$\dfrac{1}{1000}$']
+ims_list = [ims1, ims05, ims0]
+frames = [1,200,400,800]
+
+plt.figure(figsize=[6.5,3], dpi=600)
+plt.rcParams['font.size'] = 8
+for i in range(len(ims_list)):
+    for j in range(len(frames)):
+    
+        plt.subplot(3,4,1+j+i*4)
+        plt.imshow(ims_list[i][frames[j],0], interpolation='none')
+        plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+        
+        if i==0: plt.title('Time step %d'%frames[j], fontsize=8)
+        if j==0: plt.ylabel(r'MF: $\alpha$ = %s'%alphas[i], fontsize=8)
+    
+# plt.savefig('/blue/joel.harley/joseph.melville/tmp/mode_case2.png', bbox_inches='tight', dpi=600)
+plt.show()
+
+
+
+
+
+
+
+### Anisotropic metrics vs cut off angle
+
+cs = [0,25,50,75,100,125,150,175,200]
+log_ds = []
+log_ms = []
+legend = []
+for c in cs: 
+    fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1)_kt(0.66)_cut(%d).h5'%c
+    with h5py.File(fp, 'r') as f:
+        ds = f['sim0/dihedral_std'][:]; log_ds.append(ds[:,0])
+        ms = f['sim0/ims_miso_avg'][:]; log_ms.append(ms)
+        legend.append('Cut off = %d'%c)
+        plt.plot(ms)
+
+plt.xlabel('Frame')
+# plt.title('Dihedral Angles STD')
+plt.title('Mean Misorientation (without zeros)')
+plt.legend(legend)
+plt.show()
+
+log = []
+for i in range(len(log_ds)):
+    log.append((log_ds[i]-log_ds[0]).mean())
+plt.plot(cs,log)
+plt.xlabel('Cut off angle (degrees)')
+plt.ylabel('Mean difference from cut off of zero')
+plt.title('Dihedral Angles STD')
+plt.show()
+
+log = []
+for i in range(len(log_ms)):
+    log.append((log_ms[i]-log_ms[0]).mean())
+plt.plot(cs,log)
+plt.xlabel('Cut off angle (degrees)')
+plt.ylabel('Mean difference from cut off of zero')
+plt.title('Mean Misorientation (without zeros)')
+plt.show()
+
+
+
+
+### Create a figure comparing number of neighbors and misorientation
+
+fp = './data/trainset_spparks_sz(257x257)_ng(256-256)_nsets(200)_future(4)_max(100)_kt(0.66)_cut(0).h5'
+with h5py.File(fp, 'r') as f:
+    print(f.keys())
+    print(f['miso_array'].shape)
+    im = torch.from_numpy(f['ims_id'][0,0,0])
+    ma = torch.from_numpy(f['miso_array'][0])
+mm = fs.miso_array_to_matrix(ma[None])
+
+f0 = fs.num_diff_neighbors(im[None,None], window_size=7)
+f1 = fs.neighborhood_miso(im[None,None], mm, window_size=7)
+
+plt.figure(figsize=[5,2], dpi=600)
+plt.rcParams['font.size'] = 8
+
+plt.subplot(1,3,1)
+plt.imshow(im, interpolation=None)
+plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+plt.title('Microstructure')
+
+plt.subplot(1,3,2)
+plt.imshow(f0[0,0], interpolation=None)
+plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+plt.title('Number of\nDifferent Neighbors')
+
+plt.subplot(1,3,3)
+plt.imshow(f1[0,0], interpolation=None)
+plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+plt.title('Neighborhood\nMisorientation')
+
+plt.tight_layout()
+plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/feature_comp.png', bbox_inches='tight', dpi=600)
+plt.show()
+
+
+
+### Create a figure that shows sample dihedral angles 
+
+_ = fs.find_dihedral_angles_pretty_plot(im[None,None], if_plot=True, num_plot_jct=4)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# tms = [1/100, 2.09, 5.38, 9.87, 15.98, 24.91, 50, 100, 150, 200] 
+# theory = [90.05 , 95, 100, 105, 110, 115, 120, 120, 120]
 
 
 w=2; h=2
@@ -45,13 +541,14 @@ def export_legend(legend, filename="legend.png", expand=[-5,-5,5,5]):
 
 ### Circle simulations #!!!
 
+#Run - 
 # ic, ea = fs.generate_circleIC(size=[512,512], r=200)
-# ma = np.array([1])
+# ma = np.array([5])*np.pi/180
 
-# modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(25)_norm.h5'
+# modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(50).h5'
 # fp = fsp.run_primme(ic, ea, nsteps=3000, modelname=modelname, miso_array=ma, if_miso=True, plot_freq=50)
 
-plt.figure(figsize=[sw,sh], dpi=600)
+plt.figure(figsize=[6,2], dpi=600)
 plt.rcParams['font.size'] = 8
 fp = './data/primme_sz(512x512)_ng(2)_nsteps(3000)_freq(1)_kt(0.66)_cut(0)_reg(1).h5'
 for i, nf in enumerate([0,1500,3000]):
@@ -61,12 +558,14 @@ for i, nf in enumerate([0,1500,3000]):
         plt.imshow(im, interpolation='none')
         plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
         plt.xlabel('Frame: %d'%nf)
+plt.tight_layout()
 plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/circles.png', bbox_inches='tight', dpi=600)
 plt.show()
 
-
-plt.figure(figsize=[sw,sh], dpi=600)
+plt.figure(figsize=[6,2], dpi=600)
 plt.rcParams['font.size'] = 8
+
+plt.subplot(1,2,1)
 for reg in [0,1,10]:
     fp = './data/primme_sz(512x512)_ng(2)_nsteps(3000)_freq(1)_kt(0.66)_cut(0)_reg(%d).h5'%reg
     with h5py.File(fp, 'r') as f:
@@ -78,29 +577,68 @@ for reg in [0,1,10]:
 plt.legend(['Reg=0', 'Reg=1', 'Reg=10'])
 plt.ylabel('Circle Pixels Remaining')
 plt.xlabel('Number of frames')
-plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/circle_regs.png', bbox_inches='tight', dpi=600)
-plt.show()
-    
 
-plt.figure(figsize=[sw,sh], dpi=600)
-plt.rcParams['font.size'] = 8
-for ma in [0.25, 0.5, 0.75, 1]:
-    fp = './data/primme_sz(512x512)_ng(2)_nsteps(3000)_freq(1)_kt(0.66)_cut(25)_ma(%1.2f).h5'%ma
+plt.subplot(1,2,2)
+for ma in np.array([5, 20, 35, 50]): #[0.25, 0.5, 0.75, 1]:
+    fp = './data/primme_sz(512x512)_ng(2)_nsteps(3000)_freq(1)_kt(0.66)_cut(50)_ma(%d).h5'%ma
     with h5py.File(fp, 'r') as f:
         print(f.keys())
         ims = f['sim0/ims_id'][:]
     
     a = (ims==1).sum(1).sum(1).sum(1)
     plt.plot(a)   
-plt.legend(['Miso=0.25', 'Miso=0.5', 'Miso=0.75', 'Miso=1'])
+plt.legend(['Miso=5', 'Miso=20', 'Miso=35', 'Miso=50'])
 plt.ylabel('Circle Pixels Remaining')
 plt.xlabel('Number of frames')
-plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/circle_mas.png', bbox_inches='tight', dpi=600)
+
+plt.tight_layout()
+plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/circle_stats.png', bbox_inches='tight', dpi=600)
 plt.show()
+    
+# plt.figure(figsize=[sw,sh], dpi=600)
+# plt.rcParams['font.size'] = 8
+# for reg in [0,1,10]:
+#     fp = './data/primme_sz(512x512)_ng(2)_nsteps(3000)_freq(1)_kt(0.66)_cut(0)_reg(%d).h5'%reg
+#     with h5py.File(fp, 'r') as f:
+#         print(f.keys())
+#         ims = f['sim0/ims_id'][:]
+    
+#     a = (ims==1).sum(1).sum(1).sum(1)
+#     plt.plot(a)  
+# plt.legend(['Reg=0', 'Reg=1', 'Reg=10'])
+# plt.ylabel('Circle Pixels Remaining')
+# plt.xlabel('Number of frames')
+# plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/circle_regs.png', bbox_inches='tight', dpi=600)
+# plt.show()
+
+# plt.figure(figsize=[sw,sh], dpi=600)
+# plt.rcParams['font.size'] = 8
+# for ma in [0.25, 0.5, 0.75, 1]:
+#     fp = './data/primme_sz(512x512)_ng(2)_nsteps(3000)_freq(1)_kt(0.66)_cut(25)_ma(%1.2f).h5'%ma
+#     with h5py.File(fp, 'r') as f:
+#         print(f.keys())
+#         ims = f['sim0/ims_id'][:]
+    
+#     a = (ims==1).sum(1).sum(1).sum(1)
+#     plt.plot(a)   
+# plt.legend(['Miso=0.25', 'Miso=0.5', 'Miso=0.75', 'Miso=1'])
+# plt.ylabel('Circle Pixels Remaining')
+# plt.xlabel('Number of frames')
+# plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/circle_mas.png', bbox_inches='tight', dpi=600)
+# plt.show()
+
+
     
 
 
 ### Triple grain #!!!
+
+# # Run
+# ic, ea = fs.generate_3grainIC(size=[256,256], h=150)
+# ma = np.array([50,50,10])/180*np.pi
+# modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(50).h5'
+# fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, if_miso=True, pad_mode=['clip','circular'], plot_freq=50)
+
 
 # ic, ea = fs.generate_3grainIC(size=[512,512], h=350)
 
@@ -131,11 +669,11 @@ plt.show()
 # modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(0)_norm.h5'
 # fp = fsp.run_primme(ic, ea, nsteps=3000, modelname=modelname, miso_array=ma, if_miso=True, pad_mode=['clip','circular'], plot_freq=50)
 
-fp0 = './data/primme_sz(512x512)_ng(3)_nsteps(3000)_freq(1)_kt(0.66)_(T25R0)_cut(25).h5'
-fpr = './data/primme_sz(512x512)_ng(3)_nsteps(3000)_freq(1)_kt(0.66)_(T25R25)_cut(25)_right.h5'
-fpl = './data/primme_sz(512x512)_ng(3)_nsteps(3000)_freq(1)_kt(0.66)_(T25R25)_cut(25)_left.h5'
+fp0 = './data/primme_sz(256x256)_ng(3)_nsteps(1000)_freq(1)_kt(0.66)_cut(50)_iso.h5'
+fpr = './data/primme_sz(256x256)_ng(3)_nsteps(1000)_freq(1)_kt(0.66)_cut(50)_right.h5'
+fpl = './data/primme_sz(256x256)_ng(3)_nsteps(1000)_freq(1)_kt(0.66)_cut(50)_left.h5'
 
-plt.figure(figsize=[3,2], dpi=600)
+plt.figure(figsize=[5,3.5], dpi=600)
 plt.rcParams['font.size'] = 8
 for i, fp in enumerate([fpl, fp0, fpr]):
     for j, nf in enumerate([500, 1000]):
@@ -153,12 +691,27 @@ for i, fp in enumerate([fpl, fp0, fpr]):
                 elif i==2: plt.xlabel('Right Shrink')
             elif j==0: 
                 if i==0: plt.ylabel('Frame: %d'%nf)
-    plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/triple_config.png', bbox_inches='tight', dpi=600)
+plt.tight_layout()
+plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/triple_config.png', bbox_inches='tight', dpi=600)
 plt.show()
 
 
 
 ### Hex grains #!!!
+
+
+# # Run
+# ic, ea = fs.generate_hexIC()
+
+# mm = torch.ones(64,64)*50
+# mm[63,:] = 50
+# mm[:,63] = 50
+# mm[np.arange(64), np.arange(64)] = 0
+# ma = fs.miso_matrix_to_array(mm).numpy()/180*np.pi
+
+# modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(50).h5'
+# fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, if_miso=True, pad_mode=['circular','circular'], plot_freq=50)
+
 
 # ic, ea = fs.generate_hexIC()
 
@@ -190,37 +743,39 @@ plt.show()
 # modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(25)_keep.h5'
 # fp = fsp.run_primme(ic, ea, nsteps=3000, modelname=modelname, miso_array=ma, if_miso=True, pad_mode='circular', plot_freq=50)
 
+fp0 = './data/primme_sz(443x512)_ng(64)_nsteps(1000)_freq(1)_kt(0.66)_cut(50)_iso.h5'
+fp1 = './data/primme_sz(443x512)_ng(64)_nsteps(1000)_freq(1)_kt(0.66)_cut(50)_shrink.h5'
+fp2 = './data/primme_sz(443x512)_ng(64)_nsteps(1000)_freq(1)_kt(0.66)_cut(50)_grow.h5'
+
 plt.figure(figsize=[6.5,2], dpi=600)
 plt.rcParams['font.size'] = 8
-fp = './data/primme_sz(443x512)_ng(64)_nsteps(3000)_freq(1)_kt(0.66)_cut(25)_keep.h5'
-with h5py.File(fp, 'r') as f:
-    
-    plt.subplot(1,3,1)
-    im = f['sim0/ims_id'][1000,0]
-    plt.imshow(im, interpolation='none')
-    plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
-    plt.xlabel('Isotropic')
-    
-    # plt.subplot(1,3,2)
-    # im = f['sim1/ims_id'][3000,0]
-    # plt.imshow(im, interpolation='none')
-    # plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
-    # plt.xlabel('Anisotropic')
-    
-    plt.subplot(1,3,2)
-    im = f['sim2/ims_id'][350,0]
-    plt.imshow(im, interpolation='none')
-    plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
-    plt.xlabel('One Grain\nLow Misorientation')
-    plt.gca().add_patch(Rectangle((345,255),150,150,linewidth=2,edgecolor='r',facecolor='none'))
-    
-    plt.subplot(1,3,3)
-    im = f['sim3/ims_id'][350,0]
-    plt.imshow(im, interpolation='none')
-    plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
-    plt.xlabel('One Grain\nHigh Misorientation')
-    plt.gca().add_patch(Rectangle((345,255),150,150,linewidth=2,edgecolor='r',facecolor='none'))
-    
+
+plt.subplot(1,3,1)
+with h5py.File(fp0, 'r') as f: im = f['sim0/ims_id'][1000,0]
+plt.imshow(im, interpolation='none')
+plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+plt.xlabel('Isotropic')
+
+# plt.subplot(1,3,2)
+# im = f['sim1/ims_id'][3000,0]
+# plt.imshow(im, interpolation='none')
+# plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+# plt.xlabel('Anisotropic')
+
+plt.subplot(1,3,2)
+with h5py.File(fp1, 'r') as f: im = f['sim0/ims_id'][120,0]
+plt.imshow(im, interpolation='none')
+plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+plt.xlabel('One Grain\nLow Misorientation')
+plt.gca().add_patch(Rectangle((115,90),150,150,linewidth=2,edgecolor='r',facecolor='none'))
+
+plt.subplot(1,3,3)
+with h5py.File(fp2, 'r') as f: im = f['sim0/ims_id'][120,0]
+plt.imshow(im, interpolation='none')
+plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+plt.xlabel('One Grain\nHigh Misorientation')
+plt.gca().add_patch(Rectangle((115,90),150,150,linewidth=2,edgecolor='r',facecolor='none'))
+
 plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/hex.png', bbox_inches='tight', dpi=600)
 plt.show()
     
@@ -258,8 +813,7 @@ t_ma = np.arange(si-s0)
 ng_ma = ng[s0:si]
 r2_ma = r2
 
-fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T0R0)_cut(0).h5'
-# fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
+fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0)_signoise_miso.h5'
 with h5py.File(fp, 'r') as f:
     print(f.keys())
     grain_areas = f['sim0/grain_areas'][:]
@@ -276,11 +830,10 @@ t_p = np.arange(si-s0)*scale
 ng_p = ng[s0:si]
 r2_p = r2
 
-fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T25R25)_cut(25).h5'
-# fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
+fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25)_signoise.h5'
 with h5py.File(fp, 'r') as f:
     print(f.keys())
-    grain_areas = f['sim0/grain_areas'][:]
+    grain_areas = f['sim1/grain_areas'][:]
 ng = (grain_areas!=0).sum(1)
 s0 = 0#np.argmin(np.abs(ng-5000))
 si = np.argmin(np.abs(ng-1500))
@@ -318,7 +871,7 @@ r2_pa = r2
 # plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/2d_r2_vs_time2.png', bbox_inches='tight', dpi=600)
 # plt.show()
 
-plt.figure(figsize=[5,1.5], dpi=600)
+plt.figure(figsize=[6,2], dpi=600)
 plt.rcParams['font.size'] = 8
 plt.subplot(1,3,1)
 plt.plot(t_m, r2_m*1e-12, '-')
@@ -330,10 +883,14 @@ plt.ylabel('$<R>^2$ ($m^2$)')
 plt.ylim([-1.08e-10, 1.06e-09])
 
 plt.subplot(1,3,2)
+# plt.plot(t_m, r2_m*1e-12, '-')
+# plt.plot(t_ma, r2_ma*1e-12, '-')
+# plt.plot(t_p*.93, r2_p*1e-12-.12e-9, '--')
+# plt.plot(t_pa*.89 ,r2_pa*1e-12-.19e-9, '-.')
 plt.plot(t_m, r2_m*1e-12, '-')
 plt.plot(t_ma, r2_ma*1e-12, '-')
-plt.plot(t_p*.93, r2_p*1e-12-.12e-9, '--')
-plt.plot(t_pa*.89 ,r2_pa*1e-12-.19e-9, '-.')
+plt.plot(t_p, r2_p*1e-12-.10e-9, '--')
+plt.plot(t_pa,r2_pa*1e-12-.10e-9, '-.')
 plt.xlabel('Time (unitless)')
 # plt.ylabel('$<R>^2$ ($m^2$)')
 plt.ylim([-1.08e-10, 1.06e-09])
@@ -350,29 +907,29 @@ plt.show()
 
 ### Average number of sides through time (AP0, AP25, SPPARKS, PF) #!!!
 
-fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(0).h5'
-# fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
+# fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(0).h5'
+fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
 with h5py.File(fp, 'r') as f:
     gsa_m = f['sim0/grain_sides_avg'][:500]
 
-fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(25).h5'
-# fp = './data/spparks_sz(2400x2400)_ng(20000)_nsteps(2001)_freq(1.0)_kt(0.66)_cut(25).h5'
+# fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(25).h5'
+fp = './data/spparks_sz(2400x2400)_ng(20000)_nsteps(2001)_freq(1.0)_kt(0.66)_cut(25).h5'
 with h5py.File(fp, 'r') as f:
     gsa_ma = f['sim0/grain_sides_avg'][:500]
 
-fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0).h5'
-# fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T0R0)_cut(0).h5'
+# fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0).h5'
+fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
 # fp = fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
 with h5py.File(fp, 'r') as f:
-    gsa_p = f['sim5/grain_sides_avg'][:500]
+    gsa_p = f['sim0/grain_sides_avg'][:500]
 
-fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(25).h5'
-# fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T25R25)_cut(25).h5'
+# fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(25).h5'
+fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
 # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
 with h5py.File(fp, 'r') as f:
-    gsa_pa = f['sim3/grain_sides_avg'][:500]
+    gsa_pa = f['sim1/grain_sides_avg'][:500]
 
-plt.figure(figsize=[3,2], dpi=600)
+plt.figure(figsize=[4,3], dpi=600)
 plt.rcParams['font.size'] = 8
 plt.plot(gsa_m, 'C0-', linewidth=2, zorder=10)
 plt.plot(gsa_ma, 'C1-', linewidth=1, zorder=11)
@@ -380,7 +937,7 @@ plt.plot(gsa_p, 'C2--', linewidth=1, zorder=0)
 plt.plot(gsa_pa, 'C3-.', linewidth=1, zorder=0)
 plt.xlabel('Number of Frames')
 plt.ylabel('Avg Number \nof Sides')
-if if_leg: plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'])
+plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'])
 plt.tight_layout()
 plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/sides_vs_time.png', bbox_inches='tight', dpi=600)
 plt.show()
@@ -429,7 +986,7 @@ for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
     x_ma = x_edges[:-1]+np.diff(x_edges)/2
     n_ma = len(rn)
     
-    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T0R0)_cut(0).h5'
+    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
     # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
     with h5py.File(fp, 'r') as f:
         grain_areas = f['sim0/grain_areas'][:]
@@ -442,10 +999,10 @@ for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
     x_p = x_edges[:-1]+np.diff(x_edges)/2
     n_p = len(rn)
     
-    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T25R25)_cut(25).h5'
+    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
     # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
     with h5py.File(fp, 'r') as f:
-        grain_areas = f['sim0/grain_areas'][:]
+        grain_areas = f['sim1/grain_areas'][:]
     n = (grain_areas!=0).sum(1)
     j = np.argmin(np.abs(n-num_grains))
     a = grain_areas[j]
@@ -488,8 +1045,8 @@ for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
 ### 2D isotropic number of sides distribution (AP0, AP25, MCP, PF, Yadav, Mason) #!!!
 
 
-# plt.figure(figsize=[6.5,1.5], dpi=600)
-# plt.rcParams['font.size'] = 8
+plt.figure(figsize=[6.5,5], dpi=600)
+plt.rcParams['font.size'] = 8
 for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
     
     fp = '../../MF/data/spparks_sz(2400x2400)_ng(20000)_nsteps(1600)_freq(1.0)_kt(0.66)_cut(0).h5'
@@ -514,7 +1071,7 @@ for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
     x_ma = x_edges[:-1]+np.diff(x_edges)/2
     n_ma = len(s)
     
-    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T0R0)_cut(0).h5'
+    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
     # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
     with h5py.File(fp, 'r') as f:
         grain_sides = f['sim0/grain_sides'][:]
@@ -526,10 +1083,10 @@ for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
     x_p = x_edges[:-1]+np.diff(x_edges)/2
     n_p = len(s)
     
-    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T25R25)_cut(25).h5'
+    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
     # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
     with h5py.File(fp, 'r') as f:
-        grain_sides = f['sim0/grain_sides'][:]
+        grain_sides = f['sim1/grain_sides'][:]
     n = (grain_sides!=0).sum(1)
     i = np.argmin(np.abs(n-num_grains))
     s = grain_sides[i][grain_sides[i]!=0]
@@ -595,7 +1152,7 @@ for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
     _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
     h_ma, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
     
-    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T0R0)_cut(0).h5'
+    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
     # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(0).h5'
     with h5py.File(fp, 'r') as f:
         grain_areas = f['sim0/grain_areas'][:]
@@ -605,13 +1162,13 @@ for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
     _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
     h_p, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
     
-    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_(T25R25)_cut(25).h5'
+    fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
     # fp = './data/primme_sz(2400x2400)_ng(20000)_nsteps(1000)_freq(1)_kt(0.66)_cut(25).h5'
     with h5py.File(fp, 'r') as f:
-        grain_areas = f['sim0/grain_areas'][:]
+        grain_areas = f['sim1/grain_areas'][:]
         n = (grain_areas!=0).sum(1)
         j = np.argmin(np.abs(n-num_grains))
-        im = torch.from_numpy(f['sim0/ims_id'][j, 0].astype(float)).to(device)[None,]
+        im = torch.from_numpy(f['sim1/ims_id'][j, 0].astype(float)).to(device)[None,]
     _, da = fs.find_dihedral_stats2(im[:, None], if_plot=False)
     h_pa, _ = np.histogram(da[0].flatten().cpu(), bins=bins, density=True)
     
@@ -637,11 +1194,11 @@ for ii, num_grains in enumerate([4000, 3000, 2000]): #4000, 3000, 2000
 
 # plt.figure(figsize=[6.5,2], dpi=600)
 # plt.rcParams['font.size'] = 8
-plt.subplot(4,3,11)
-plt.axis('off')
-plt.plot(0,0, 'C0'); plt.plot(0,0, 'C0--'); plt.plot(0,0, 'C1'); 
-plt.plot(0,0, 'C1--'); plt.plot(0,0, 'C2*'); plt.plot(0,0, 'C3d'); plt.plot(0,0, 'C4^')
-plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)', 'Yadav 2018', 'Zollner 2016', 'Masson 2015'], loc=10, framealpha=1)
+# plt.subplot(4,3,11)
+# plt.axis('off')
+# plt.plot(0,0, 'C0'); plt.plot(0,0, 'C0--'); plt.plot(0,0, 'C1'); 
+# plt.plot(0,0, 'C1--'); plt.plot(0,0, 'C2*'); plt.plot(0,0, 'C3d'); plt.plot(0,0, 'C4^')
+# plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)', 'Yadav 2018', 'Zollner 2016', 'Masson 2015'], loc=10, framealpha=1)
 
 plt.tight_layout()
 plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/dists.png', bbox_inches='tight', dpi=600)
@@ -649,7 +1206,21 @@ plt.show()
     
 
 
-### 2D isotropic microstructure comparisons (MF, MCP, PF) #!!!
+### Microstructure comparisons (MF, MCP, PF) #!!!
+
+# # RUN
+# fp = '../../MF/data/mf_sz(512x512)_ng(512)_nsteps(1000)_cov(25)_numnei(64)_cut(0).h5'
+# with h5py.File(fp, 'r') as f:
+#     ic = torch.from_numpy(f['sim0/ims_id'][0,0].astype(float))-1
+#     ea = torch.from_numpy(f['sim0/euler_angles'][:].astype(float))
+#     ma = f['sim0/miso_array'][:].astype(float)
+
+# modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(0).h5'
+# fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, if_miso=True, plot_freq=50)
+
+# modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(25).h5'
+# fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname, miso_array=ma, if_miso=True, plot_freq=50)
+
 
 num_grains = [512, 300, 150, 50]
 
@@ -748,29 +1319,59 @@ with h5py.File(fp, 'r') as f:
 
 ### Average miso difference through time  #!!!
 
+
+# # Run
+fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(0).h5'
+with h5py.File(fp, 'r') as f: 
+    ic = f['sim0/ims_id'][0,0].astype(float)
+    ea = f['sim0/euler_angles'][:]
+    ma = f['sim0/miso_array'][:]
+
+# modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(0).h5'
+# fp = fsp.run_primme(ic, ea, nsteps=500, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=True, plot_freq=50)
+# fs.compute_grain_stats(fp)
+
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(0)_relu.h5'
+fp = fsp.run_primme(ic, ea, nsteps=500, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=False, plot_freq=50)
+fs.compute_grain_stats(fp)
+
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(25)_relu.h5'
+fp = fsp.run_primme(ic, ea, nsteps=500, modelname=modelname, miso_array=ma, pad_mode='circular', if_miso=True, plot_freq=50)
+fs.compute_grain_stats(fp)
+
+#RENAME models and sims to "relu", then see if they are back to normal
+#TRY a new model with sigmoid, but no random choices, or with standardization
+
+
+
+
+
+
+
+
 fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(0).h5'
 with h5py.File(fp, 'r') as f:
-    # das_m = f['sim0/dihedral_std'][:]
+    das_m = f['sim0/dihedral_std'][:500]
     msa_m = f['sim0/ims_miso_avg'][:500]
     ng_m = (f['sim0/grain_areas'][:]!=0).sum(1)
 
 fp = './data/spparks_sz(1024x1024)_ng(4096)_nsteps(1000)_freq(1.0)_kt(0.66)_cut(25).h5'
 with h5py.File(fp, 'r') as f:
-    # das_ma = f['sim0/dihedral_std'][:]
+    das_ma = f['sim0/dihedral_std'][:500]
     msa_ma = f['sim0/ims_miso_avg'][:500]
     ng_ma = (f['sim0/grain_areas'][:]!=0).sum(1)
 
-fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0).h5'
+fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0)_relu.h5'
 with h5py.File(fp, 'r') as f:
-    # das_p = f['sim5/dihedral_std'][:]
-    msa_p = f['sim5/ims_miso_avg'][:500]
-    ng_p = (f['sim5/grain_areas'][:]!=0).sum(1)
+    das_p = f['sim0/dihedral_std'][:500]
+    msa_p = f['sim0/ims_miso_avg'][:500]
+    ng_p = (f['sim0/grain_areas'][:]!=0).sum(1)
 
-fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(25).h5'
+fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(25)_relu.h5'
 with h5py.File(fp, 'r') as f:  
-    # das_pa = f['sim3/dihedral_std'][:]
-    msa_pa = f['sim3/ims_miso_avg'][:500]
-    ng_pa = (f['sim3/grain_areas'][:]!=0).sum(1)
+    das_pa = f['sim0/dihedral_std'][:500]
+    msa_pa = f['sim0/ims_miso_avg'][:500]
+    ng_pa = (f['sim0/grain_areas'][:]!=0).sum(1)
 
 
 
@@ -791,12 +1392,15 @@ plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'], 
 plt.subplot(2,2,3)
 plt.plot(das_ma-das_m, 'C0.', ms=3)
 plt.plot(das_pa-das_p, 'C1^', ms=3)
-plt.plot([0,1000],[(das_ma-das_m).mean(),]*2, 'k--',linewidth=2)
-plt.plot([0,1000],[(das_pa-das_p).mean(),]*2, 'k--',linewidth=2)
+plt.plot([0,500],[(das_ma-das_m).mean(),]*2, 'k--',linewidth=2)
+plt.plot([0,500],[(das_pa-das_p).mean(),]*2, 'k--',linewidth=2)
 plt.ylabel('Difference in STD')
 plt.xlabel('Number of Frames')
-plt.ylim([-1,8])
+# plt.ylim([-5,8])
 plt.legend(['MCP - Mean: %1.2f'%((das_ma-das_m).mean()), 'APRIMME - Mean: %1.2f'%((das_pa-das_p).mean())], fontsize=7, loc='best')
+
+# np.min([np.min(msa_m), np.min(msa_ma), np.min(msa_p), np.min(msa_pa)])
+# np.max([np.max(msa_m), np.max(msa_ma), np.max(msa_p), np.max(msa_pa)])
 
 plt.subplot(2,2,2)
 plt.plot(msa_m, 'C0-')
@@ -805,7 +1409,7 @@ plt.plot(msa_p, 'C2-')
 plt.plot(msa_pa, 'C3--')
 plt.title('Neighborhood Misorientation')
 plt.ylabel('Mean without Zeros')
-plt.ylim([1.55, 1.90])
+# plt.ylim([1.55, 1.90])
 plt.tick_params(bottom=True, left=False,labelleft=True, labelbottom=False)
 plt.legend(['MCP (cut=0)','MCP (cut=25)','APRIMME (cut=0)','APRIMME (cut=25)'], loc='best')
 
@@ -827,12 +1431,40 @@ plt.show()
 
 
 
+fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0).h5'
+with h5py.File(fp, 'r') as f:
+    das0 = f['sim0/dihedral_std'][:500]
+    msa0 = f['sim0/ims_miso_avg'][:500]
+    ng0 = (f['sim0/grain_areas'][:]!=0).sum(1)
+
+fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(0)_miso.h5'
+with h5py.File(fp, 'r') as f:
+    das1 = f['sim0/dihedral_std'][:500]
+    msa1 = f['sim0/ims_miso_avg'][:500]
+    ng1 = (f['sim0/grain_areas'][:]!=0).sum(1)
+
+fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(25)_miso.h5'
+with h5py.File(fp, 'r') as f:
+    das2 = f['sim0/dihedral_std'][:500]
+    msa2 = f['sim0/ims_miso_avg'][:500]
+    ng2 = (f['sim0/grain_areas'][:]!=0).sum(1)
+
+fp = './data/primme_sz(1024x1024)_ng(4096)_nsteps(500)_freq(1)_kt(0.66)_cut(50)_miso.h5'
+with h5py.File(fp, 'r') as f:
+    das3 = f['sim0/dihedral_std'][:500]
+    msa3 = f['sim0/ims_miso_avg'][:500]
+    ng3 = (f['sim0/grain_areas'][:]!=0).sum(1)
 
 
+plt.plot(das0)
+# plt.plot(das1)
+plt.plot(das2)
+plt.plot(das3)
 
-
-
-
+np.mean(das0)
+np.mean(das1)
+np.mean(das2)
+np.mean(das3)
 
 
 

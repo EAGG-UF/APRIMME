@@ -26,11 +26,40 @@ import torch
 
 
 
+ic, ea, _ = fs.voronoi2image(size=[514,514], ngrain=512)
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(0).h5'
+modelname = './data/model_dim(2)_sz(17_17)_lr(5e-05)_reg(1)_ep(1000)_kt(0.66)_cut(0)_norm.h5'
+
+fp = fsp.run_primme(ic, ea, nsteps=1000, modelname=modelname,  if_miso=False, plot_freq=20)
+fs.make_videos([fp])
+
+
+
+fp = './data/primme_sz(514x514)_ng(512)_nsteps(1000)_freq(1)_kt(0.66)_cut(0)_norm.h5'
+fp = './data/primme_sz(512x512)_ng(512)_nsteps(1000)_freq(1)_kt(0.66)_cut(0)_keep.h5'
+
+
+import imageio
+
+with h5py.File(fp, 'r') as f:
+    print(f.keys())
+    ims = f['sim0/ims_id'][:50, 0]
+    
+
+plt.imshow(ims[1])
+
+ims = (255/np.max(ims)*ims).astype(np.uint8)
+imageio.mimsave('./plots/ims_id.gif', ims)
+
+
+
+
 # TRAINING
 
 trainset = './data/trainset_spparks_sz(257x257)_ng(256-256)_nsets(200)_future(4)_max(100)_kt(0.66)_cut(0).h5'
 model_name = fsp.train_primme(trainset, num_eps=1000, obs_dim=17, act_dim=17, lr=5e-5, reg=1, if_miso=False, plot_freq=20)
     
+
 trainset = './data/trainset_spparks_sz(257x257)_ng(256-256)_nsets(200)_future(4)_max(100)_kt(0.66)_cut(25).h5'
 model_name = fsp.train_primme(trainset, num_eps=1000, obs_dim=17, act_dim=17, lr=5e-5, reg=1, if_miso=True, plot_freq=20)
     

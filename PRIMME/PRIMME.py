@@ -41,8 +41,8 @@ class PRIMME(nn.Module):
         self.training_acc = []
         self.validation_acc = []
         
-        self.log0 = []
-        self.log1 = []
+        self.logx = []
+        self.logy = []
         
         # DEFINE NEURAL NETWORK
         self.f1 = nn.Linear(self.obs_dim ** self.num_dims, 21 * 21 * 4)
@@ -76,7 +76,8 @@ class PRIMME(nn.Module):
         out = F.relu(self.f3(out))
         out = self.dropout(out)
         out = self.BatchNorm3(out)
-        y  = torch.relu(self.f4(out))
+        # y  = torch.relu(self.f4(out))
+        y  = torch.sigmoid(self.f4(out))
         
         return y
     
@@ -147,8 +148,8 @@ class PRIMME(nn.Module):
         num_features = 0
         im_next_log = []
         
-        log0 = []
-        log1 = []
+        logx = []
+        logy = []
         
         for i in range(num_iter):
             
@@ -165,7 +166,31 @@ class PRIMME(nn.Module):
             # Pass features through model
             features = next(features_gen).reshape(-1, self.obs_dim**self.num_dims)
             outputs = self.forward(features[use_i,])
-            switch_i = outputs.argmax(1)
+            
+            
+            # iii = -256*8-100#(256*1+220)
+            # aaa = outputs[iii,]
+            # plt.imshow(aaa.reshape(17,17).detach().cpu())   
+            # plt.show()
+            
+            
+            # bbb = features[use_i,][iii]
+            # plt.imshow(bbb.reshape(17,17).detach().cpu()) 
+            # plt.show()
+            
+            # ccc = im_unfold[use_i,][iii]
+            # plt.imshow(ccc.reshape(17,17).detach().cpu()) 
+            # plt.show()
+            
+            # torch.unique(ccc, return_counts=True)
+            
+            
+            
+            
+            tmp = torch.rand(outputs.shape).to(outputs.device)/1e9
+            
+            switch_i = (outputs+tmp).argmax(1)
+            # switch_i = (outputs).argmax(1)
             action_likelyhood += outputs.sum(0).detach().cpu().reshape((self.act_dim,)*self.num_dims)
             
             # Find predicted IDs
@@ -173,6 +198,9 @@ class PRIMME(nn.Module):
             next_ids[use_i] = im_unfold[use_i,][torch.arange(len(use_i)),switch_i]
             im_next_log.append(next_ids)
             
+            iii, jjj = fs.shape_indices(switch_i, torch.Tensor([17,17]))
+            logx.append(iii.float().mean().cpu()-8)
+            logy.append(jjj.float().mean().cpu()-8)
             
             #what is the mean of the outputs
             # ooo = outputs_rot
@@ -228,8 +256,8 @@ class PRIMME(nn.Module):
         # Concatenate batches to form next image (as predicted)
         im_next = torch.cat(im_next_log).reshape(im.shape)
         
-        # self.log0.append(np.stack(log0).mean(0)) #center of mass of whole step
-        # self.log1.append(np.stack(log1).mean(0)) #center of mass of whole step
+        self.logx.append(np.stack(logx).mean(0)) #center of mass of whole step
+        self.logy.append(np.stack(logy).mean(0)) #center of mass of whole step
         
         # Find average of loss and accuracy
         if num_future>0 and num_features>0: 
@@ -581,22 +609,28 @@ def train_primme(trainset, num_eps, obs_dim=17, act_dim=17, lr=5e-5, reg=1, pad_
             if i%plot_freq==0:
                 agent.plot()
                 
-                
-                tmp0 = np.stack(agent.log0).T
-                tmp1 = np.stack(agent.log1).T
-                
-                # print(np.mean(tmp0))
-                # print(np.mean(tmp1))
+                tmpx = np.stack(agent.logx).T
+                tmpy = np.stack(agent.logy).T
                 
                 plt.figure()
-                plt.plot(tmp0[0], 'C0-') 
-                plt.plot(tmp0[1], 'C0--') 
-                plt.plot(tmp1[0], 'C1-') 
-                plt.plot(tmp1[1], 'C1--')  
-                plt.legend(['Mean Distribution (x)','Mean Distribution (y)','Mean Index (x)','Mean Index (y)'])
-                plt.xlabel('Number of Frames')
-                plt.ylabel('Num pixels from (0,0)')
+                plt.plot(tmpx)
+                plt.plot(tmpy)
                 plt.show()
+                # tmp0 = np.stack(agent.log0).T
+                # tmp1 = np.stack(agent.log1).T
+                
+                # # print(np.mean(tmp0))
+                # # print(np.mean(tmp1))
+                
+                # plt.figure()
+                # plt.plot(tmp0[0], 'C0-') 
+                # plt.plot(tmp0[1], 'C0--') 
+                # plt.plot(tmp1[0], 'C1-') 
+                # plt.plot(tmp1[1], 'C1--')  
+                # plt.legend(['Mean Distribution (x)','Mean Distribution (y)','Mean Index (x)','Mean Index (y)'])
+                # plt.xlabel('Number of training iterations')
+                # plt.ylabel('Num pixels from (0,0)')
+                # plt.show()
     
     return modelname
 

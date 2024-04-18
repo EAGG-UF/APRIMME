@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+# !/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 IF THIS CODE IS USED FOR A RESEARCH PUBLICATION, please cite:
-    Yan, W., Melville, J., Yadav, V., Everett, K., Yang, L., Kesler, M. S., ... & Harley, J. B. (2022). A novel physics-regularized interpretable machine learning model for grain growth. Materials & Design, 222, 111032.
+    Melville, J., Yadav, V., Yang, L., Krause, A. R., Tonks, M. R., & Harley, J. B. (2024). Anisotropic physics-regularized interpretable machine learning of microstructure evolution. Computational Materials Science, 238, 112941.
 """
 
 # IMPORT LIBRARIES
@@ -230,13 +230,13 @@ class PRIMME(nn.Module):
                     o = outputs
                     
                     
-                    om = o.mean(1)[:,None]
-                    os = o.std(1)[:,None]
-                    oo = (o-om)/os
+                    # om = o.mean(1)[:,None]
+                    # os = o.std(1)[:,None]
+                    # oo = (o-om)/os
                     
-                    lm = l.mean(1)[:,None]
-                    ls = l.std(1)[:,None]
-                    ll = (l-lm)/ls
+                    # lm = l.mean(1)[:,None]
+                    # ls = l.std(1)[:,None]
+                    # ll = (l-lm)/ls
                     
                     
                     # plt.imshow(oo.mean(0).reshape(17,17).detach().cpu())
@@ -246,7 +246,7 @@ class PRIMME(nn.Module):
                     # plt.show()
                     
                     
-                    loss += self.loss_func(oo, ll)*len(use_i) #convert MSE loss back to sum to find average of total
+                    loss += self.loss_func(o, l)*len(use_i) #convert MSE loss back to sum to find average of total
                    
                     # loss += self.loss_func(outputs, labels[use_i,])*len(use_i) #convert MSE loss back to sum to find average of total
                     next_ids_true = im_next_true_split[i]
@@ -635,7 +635,7 @@ def train_primme(trainset, num_eps, obs_dim=17, act_dim=17, lr=5e-5, reg=1, pad_
     return modelname
 
 
-def run_primme(ic, ea, nsteps, modelname, miso_array=None, pad_mode='circular', plot_freq=None, if_miso=False):
+def run_primme(ic, ea, nsteps, modelname, miso_array=None, pad_mode='circular', plot_freq=None, if_miso=False, if_save=True):
     
     # Setup variables
     d = len(ic.shape)
@@ -653,34 +653,16 @@ def run_primme(ic, ea, nsteps, modelname, miso_array=None, pad_mode='circular', 
     sz_str = ''.join(['%dx'%i for i in size])[:-1]
     fp_save = './data/primme_sz(%s)_ng(%d)_nsteps(%d)_freq(1)_kt%s'%(sz_str,ngrain,nsteps,append_name)
     
-    # Simulate and store in H5
-    with h5py.File(fp_save, 'a') as f:
-        
-        # If file already exists, create another group in the file for this simulaiton
-        num_groups = len(f.keys())
-        hp_save = 'sim%d'%num_groups
-        g = f.create_group(hp_save)
-        
-        # Save data
-        s = list(im.shape); s[0] = nsteps + 1
-        dset = g.create_dataset("ims_id", shape=s, dtype=dtype)
-        dset2 = g.create_dataset("euler_angles", shape=ea.shape)
-        dset3 = g.create_dataset("miso_array", shape=miso_array.shape)
-        dset4 = g.create_dataset("miso_matrix", shape=miso_matrix[0].shape)
-        dset[0] = im[0].cpu()
-        dset2[:] = ea
-        dset3[:] = miso_array #radians (does not save the exact "Miso.txt" file values, which are degrees divided by the cutoff angle)
-        dset4[:] = miso_matrix[0].cpu() #same values as mis0_array, different format
-        
+    
+    
+    
+    if if_save is False:
         for i in tqdm(range(nsteps), 'Running PRIMME simulation: '):
             
             # Simulate
             if if_miso: im_next = agent.step(im, miso_matrix)
             else: im_next = agent.step(im)
             im = im_next.clone()
-
-            #Store
-            dset[i+1,:] = im[0].cpu()
             
             #Plot
             if plot_freq is not None: 
@@ -689,6 +671,46 @@ def run_primme(ic, ea, nsteps, modelname, miso_array=None, pad_mode='circular', 
                     s = (0,0,slice(None), slice(None),) + (int(im.shape[-1]/2),)*(d-2)
                     plt.imshow(im[s].cpu(), interpolation=None) 
                     plt.show()
+                    
+        return None
+    
+    else:
+        # Simulate and store in H5
+        with h5py.File(fp_save, 'a') as f:
+            
+            # If file already exists, create another group in the file for this simulaiton
+            num_groups = len(f.keys())
+            hp_save = 'sim%d'%num_groups
+            g = f.create_group(hp_save)
+            
+            # Save data
+            s = list(im.shape); s[0] = nsteps + 1
+            dset = g.create_dataset("ims_id", shape=s, dtype=dtype)
+            dset2 = g.create_dataset("euler_angles", shape=ea.shape)
+            dset3 = g.create_dataset("miso_array", shape=miso_array.shape)
+            dset4 = g.create_dataset("miso_matrix", shape=miso_matrix[0].shape)
+            dset[0] = im[0].cpu()
+            dset2[:] = ea
+            dset3[:] = miso_array #radians (does not save the exact "Miso.txt" file values, which are degrees divided by the cutoff angle)
+            dset4[:] = miso_matrix[0].cpu() #same values as mis0_array, different format
+            
+            for i in tqdm(range(nsteps), 'Running PRIMME simulation: '):
+                
+                # Simulate
+                if if_miso: im_next = agent.step(im, miso_matrix)
+                else: im_next = agent.step(im)
+                im = im_next.clone()
+    
+                #Store
+                dset[i+1,:] = im[0].cpu()
+                
+                #Plot
+                if plot_freq is not None: 
+                    if i%plot_freq==0:
+                        plt.figure()
+                        s = (0,0,slice(None), slice(None),) + (int(im.shape[-1]/2),)*(d-2)
+                        plt.imshow(im[s].cpu(), interpolation=None) 
+                        plt.show()
                     
                     
                     
@@ -720,7 +742,7 @@ def run_primme(ic, ea, nsteps, modelname, miso_array=None, pad_mode='circular', 
                     # plt.legend(['CoM of mean distribution','Mean chosen index'])
                     # plt.show()
                         
-    return fp_save
+        return fp_save
     
     
     

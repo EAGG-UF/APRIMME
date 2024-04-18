@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+# !/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 IF THIS CODE IS USED FOR A RESEARCH PUBLICATION, please cite:
-    Yan, W., Melville, J., Yadav, V., Everett, K., Yang, L., Kesler, M. S., ... & Harley, J. B. (2022). A novel physics-regularized interpretable machine learning model for grain growth. Materials & Design, 222, 111032.
+    Melville, J., Yadav, V., Yang, L., Krause, A. R., Tonks, M. R., & Harley, J. B. (2024). Anisotropic physics-regularized interpretable machine learning of microstructure evolution. Computational Materials Science, 238, 112941.
 """
 
 ### Import functions

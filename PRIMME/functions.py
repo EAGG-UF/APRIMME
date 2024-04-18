@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 IF THIS CODE IS USED FOR A RESEARCH PUBLICATION, please cite:
-    Yan, W., Melville, J., Yadav, V., Everett, K., Yang, L., Kesler, M. S., ... & Harley, J. B. (2022). A novel physics-regularized interpretable machine learning model for grain growth. Materials & Design, 222, 111032.
+    Melville, J., Yadav, V., Yang, L., Krause, A. R., Tonks, M. R., & Harley, J. B. (2024). Anisotropic physics-regularized interpretable machine learning of microstructure evolution. Computational Materials Science, 238, 112941.
 """
 
 ### Import functions
@@ -1438,8 +1438,8 @@ def gid_to_miso(ims_unfold, miso_matrices):
     ims_repeat = tmp.repeat(1, num_neigh, 1) #repeat the centers to compare against all neighbors
     
     # Define the indicies to search the miso_matrices for corresponding misorientations
-    i = (ims_unfold.flatten()).long() 
-    j = (ims_repeat.flatten()).long() 
+    i = (ims_unfold.flatten()).long()
+    j = (ims_repeat.flatten()).long()
     tmp = torch.zeros([1,num_neigh*num_elem])
     tmp2 = [tmp+h for h in range(num_ims)]
     k = torch.cat(tmp2).long().flatten().to(ims_unfold.device)
@@ -3021,8 +3021,31 @@ def find_dihedral_angles_pretty_plot(im, if_plot=False, num_plot_jct=10):
                 
                 tmp = input('Plot more junctions (y/n)?')
                 if tmp!='y': if_plot=False
-            
+                
     return torch.cat(log_da, dim=1)
+
+
+
+    # i = np.random.randint(y.shape[1]/3)
+    
+    # plt.imshow(im[0,0].cpu())
+    # plt.plot(y[:,i*3:(i+1)*3].cpu(), x[:,i*3:(i+1)*3].cpu(),'.',ms=10)
+    # plt.plot(y_fit[:,i*3:(i+1)*3].cpu(), x_fit[:,i*3:(i+1)*3].cpu(), linewidth=5)
+    # plt.xlim([y[0,i*3].cpu()-h, y[0,i*3].cpu()+h+1])
+    # plt.ylim([x[0,i*3].cpu()-h, x[0,i*3].cpu()+h+1])
+    # # plt.title('Junction: %d'%i)
+    # plt.tick_params(bottom=False, left=False,labelleft=False, labelbottom=False)
+    
+    
+    # print(log_da[0][:,i])
+    
+    # plt.tight_layout()
+    # plt.savefig('/blue/joel.harley/joseph.melville/tmp_APRIMME/dihedral_fits2.png', bbox_inches='tight', dpi=600)
+    # plt.show()
+    
+            
+            
+    
 
 
 def find_dihedral_stats(ims, if_plot=False):
